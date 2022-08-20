@@ -47,40 +47,27 @@ func (m *Member)ParseFrom(r encoding.Reader)(err error){
 	return
 }
 
-type connMember struct{
-	*Member
-	conn *net.TCPConn
-}
-
-func (m *connMember)accept(room *Room)(err error){
-	r, w := encoding.WrapReader(m.conn), encoding.WrapWriter(m.conn)
-	m.Member = &Member{}
-	if err = m.Member.ParseFrom(r); err != nil {
-		return
-	}
-	if err = room.WriteTo(w); err != nil {
-		return
-	}
-	return
-}
-
 
 type Room struct{
 	id uint32
 	name string
 
 	owned bool
+	server *Server
+	target *net.TCPAddr
 	owner *Member
-	members map[uint32]connMember
+	members map[uint32]*Member
 }
 
-func NewRoom(id uint32, name string, owner *Member)(*Room){
+func NewRoom(id uint32, name string, server *Server, target *net.TCPAddr)(*Room){
 	return &Room{
 		id: id,
 		name: name,
 		owned: true,
-		owner: owner,
-		members: make(map[uint32]connMember),
+		server: server,
+		target: target,
+		owner: server.owner,
+		members: make(map[uint32]*Member),
 	}
 }
 
@@ -96,10 +83,14 @@ func (r *Room)SetName(name string){
 	r.name = name
 }
 
+func (r *Room)Owner()(*Member){
+	return r.owner
+}
+
 func (r *Room)Members()(mems []*Member){
 	mems = make([]*Member, 0, len(r.members))
 	for _, m := range r.members {
-		mems = append(mems, m.Member)
+		mems = append(mems, m)
 	}
 	return
 }
@@ -146,37 +137,28 @@ func (r *Room)ParseFrom(rd encoding.Reader)(err error){
 		return
 	}
 	r.owner = owner
-	r.members = make(map[uint32]connMember)
+	r.members = make(map[uint32]*Member)
 	return
 }
 
-func (r *Room)Accept(conn *net.TCPConn)(err error){
+func (r *Room)put(m *Member)(bool){
 	r.checkOwned()
-	m := connMember{nil, conn}
-	if err = m.accept(r); err != nil {
-		return
+	if m.Id() == r.owner.Id() {
+		panic("Cannot put owner member")
 	}
-	r.put(m)
-	// TODO: broadcast join message
-	return
-}
-
-func (r *Room)put(m connMember){
 	if  _, ok := r.members[m.Id()]; ok {
-		panic("Member.id already exists")
+		return false
 	}
 	r.members[m.Id()] = m
+	return true
 }
 
 func (r *Room)GetMember(id uint32)(m *Member){
-	m0, ok := r.members[id]
-	if ok {
-		m = m0.Member
-	}
+	m, _ = r.members[id]
 	return
 }
 
-func (r *Room)pop(id uint32)(m connMember, ok bool){
+func (r *Room)pop(id uint32)(m *Member, ok bool){
 	if id == r.owner.Id() {
 		panic("Cannot pop owner")
 	}
@@ -189,12 +171,10 @@ func (r *Room)pop(id uint32)(m connMember, ok bool){
 
 func (r *Room)Kick(id uint32, reason string)(m *Member){
 	r.checkOwned()
-	m0, ok := r.pop(id)
+	m, ok := r.pop(id)
 	if !ok {
 		return
 	}
-	m = m0.Member
-	// TODO: send kick message
 	return
 }
 
