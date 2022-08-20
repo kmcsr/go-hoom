@@ -3,98 +3,133 @@ package hoom
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"io"
 	"net"
+	"time"
 
-	"github.com/kmcsr/go-pio/encoding"
+	// "github.com/kmcsr/go-pio/encoding"
+	"github.com/kmcsr/go-pio"
 )
 
-var (
-	RoomNotExist = errors.New("Room not exist")
-	RepeatConn = errors.New("Repeat connect to a same room")
-)
 
 type connRoom struct{
 	*Room
-	conn *net.TCPConn
+	w io.Writer
 }
 
 type Client struct{
-	m *Member
+	mem *Member
+	conn *pio.Conn
 	rooms map[uint32]connRoom
 }
 
-func (c *Client)ConnTo(addr *net.TCPAddr)(room *Room, err error){
+func NewClient(m *Member, addr *net.TCPAddr)(c *Client, err error){
 	var conn *net.TCPConn
 	conn, err = net.DialTCP("tcp", nil, addr)
 	if err != nil {
 		return
 	}
-	defer func(){
-		if conn != nil {
-			conn.Close()
+	c = &Client{
+		mem: m,
+		conn: pio.NewConn(conn, conn),
+	}
+	go c.serve()
+	if err = c.conn.Send(&CbindPkt{
+		Mem: m,
+	}); err != nil {
+		return
+	}
+	return
+}
+
+func (c *Client)Ping()(ping time.Duration, err error){
+	return c.conn.Ping()
+}
+
+func (c *Client)GetRoom(id uint32)(r *Room){
+	if rc, ok := c.rooms[id]; ok {
+		r = rc.Room
+	}
+	return
+}
+
+func (c *Client)Disconnect(id uint32)(err error){
+	if _, ok := c.pop(id); ok {
+		if err = c.conn.Send(&CclosePkt{
+			RoomId: id,
+		}); err != nil {
+			return
 		}
-	}()
-	if err = c.m.WriteTo(encoding.WrapWriter(conn)); err != nil {
-		return
 	}
-	room = new(Room)
-	if err = room.ParseFrom(encoding.WrapReader(conn)); err != nil {
-		return
-	}
-	if _, ok := c.rooms[room.Id()]; ok {
-		return nil, RepeatConn
-	}
-	c.rooms[room.Id()] = connRoom{room, conn}
-	conn = nil
 	return
 }
 
-func (c *Client)GetRoom(id uint32)(r *Room, ok bool){
-	var rc connRoom
+func (c *Client)pop(id uint32)(rc connRoom, ok bool){
 	if rc, ok = c.rooms[id]; ok {
-		r = rc.Room
-	}
-	return
-}
-
-func (c *Client)Disconnect(id uint32)(r *Room, err error){
-	if rc, ok := c.pop(id); ok {
-		r = rc.Room
-		err = rc.conn.Close()
-	}
-	return
-}
-
-func (c *Client)pop(id uint32)(r connRoom, ok bool){
-	r, ok = c.rooms[id]
-	if ok {
 		delete(c.rooms, id)
 	}
 	return
 }
 
-func (c *Client)Proxy(id uint32, rw io.ReadWriter)(err error){
-	return c.ProxyWith(context.Background(), id, rw)
+func (c *Client)initConn(){
+	c.conn.AddPacket(func()(pio.PacketBase){ return &SjoinPkt  {c: c} })
+	c.conn.AddPacket(func()(pio.PacketBase){ return &SjoinBPkt {c: c} })
+	c.conn.AddPacket(func()(pio.PacketBase){ return &SleavePkt {c: c} })
+	c.conn.AddPacket(func()(pio.PacketBase){ return &SleaveBPkt{c: c} })
+	c.conn.AddPacket(func()(pio.PacketBase){ return &SerrorPkt {c: c} })
+	c.conn.AddPacket(func()(pio.PacketBase){ return &SclosePkt {c: c} })
+	c.conn.AddPacket(func()(pio.PacketBase){ return &SsendPkt  {c: c} })
 }
 
-func (c *Client)ProxyWith(ctx context.Context, id uint32, rw io.ReadWriter)(err error){
-	rc, ok := c.rooms[id]
-	if !ok {
-		return RoomNotExist
+func (c *Client)serve()(err error){
+	c.initConn()
+	return c.conn.Serve()
+}
+
+func (c *Client)Dial(id uint32, rw io.ReadWriter)(err error){
+	return c.DialWith(context.Background(), id, rw)
+}
+
+func (c *Client)DialWith(ctx context.Context, id uint32, rw io.ReadWriter)(err error){
+	var res pio.PacketBase
+	if res, err = c.conn.Ask(&CjoinPkt{
+		RoomId: id,
+	}); err != nil {
+		return
 	}
+	var room *Room
+	switch rs := res.(type) {
+	case *SjoinPkt:
+		room = rs.Room
+	case *SerrorPkt:
+		return fmt.Errorf(rs.Error)
+	default:
+		panic("Unexpected result")
+	}
+	c.rooms[id] = connRoom{room, rw}
+
 	ch := make(chan struct{})
 	go func(){
 		defer close(ch)
-		if _, err0 := io.Copy(rw, rc.conn); err0 != nil {
-			err = err0
+		var (
+			buf = make([]byte, 1024 * 64)
+			n int
+			er error
+		)
+		for {
+			if n, er = rw.Read(buf); er != nil {
+				break
+			}
+			if er = c.conn.Send(&CsendPkt{
+				RoomId: room.Id(),
+				Data: buf[:n],
+			}); er != nil {
+				break
+			}
 		}
-	}()
-	go func(){
-		defer close(ch)
-		if _, err0 := io.Copy(rc.conn, rw); err0 != nil {
-			err = err0
+		if er != nil {
+			err = er
 		}
 	}()
 	select {

@@ -105,6 +105,16 @@ func (r *Room)checkOwned(){
 	}
 }
 
+func (r *Room)Server()(*Server){
+	r.checkOwned()
+	return r.server
+}
+
+func (r *Room)Target()(*net.TCPAddr){
+	r.checkOwned()
+	return r.target
+}
+
 func (r *Room)WriteTo(w encoding.Writer)(err error){
 	r.checkOwned()
 	if err = w.WriteUint32(r.id); err != nil {
@@ -153,11 +163,6 @@ func (r *Room)put(m *Member)(bool){
 	return true
 }
 
-func (r *Room)GetMember(id uint32)(m *Member){
-	m, _ = r.members[id]
-	return
-}
-
 func (r *Room)pop(id uint32)(m *Member, ok bool){
 	if id == r.owner.Id() {
 		panic("Cannot pop owner")
@@ -169,12 +174,12 @@ func (r *Room)pop(id uint32)(m *Member, ok bool){
 	return
 }
 
-func (r *Room)Kick(id uint32, reason string)(m *Member){
+func (r *Room)GetMember(id uint32)(m *Member){
+	return r.members[id]
+}
+
+func (r *Room)Kick(id uint32, reason string)(err error){
 	r.checkOwned()
-	m, ok := r.pop(id)
-	if !ok {
-		return
-	}
-	return
+	return r.server.Kick(r.id, id, reason)
 }
 

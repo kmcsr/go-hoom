@@ -8,42 +8,20 @@ import (
 	"github.com/kmcsr/go-pio"
 )
 
-type serverRoom struct{
-	*Room
-	conns []*serverConn
-}
-
-func (r *serverRoom)put(s *serverConn)(ok bool){
-	if ok = r.Room.put(s.mem); ok {
-		r.conns = append(r.conns, s)
-	}
-	return 
-}
-
-func (r *serverRoom)pop(s *serverConn)(ok bool){
-	if _, ok = r.Room.pop(s.mem.Id()); ok {
-		for i, c := range r.conns {
-			if c == s {
-				r.conns[i] = r.conns[len(r.conns) - 1]
-				r.conns = r.conns[:len(r.conns) - 1]
-			}
-		}
-	}
-	return
-}
-
 type Server struct{
 	Addr *net.TCPAddr
 
 	owner *Member
-	rooms map[uint32]*serverRoom
+	rooms map[uint32]*Room
+	conns map[uint32]*serverConn
 }
 
 func NewServer(addr *net.TCPAddr, owner *Member)(*Server){
 	return &Server{
 		Addr: addr,
 		owner: owner,
-		rooms: make(map[uint32]*serverRoom),
+		rooms: make(map[uint32]*Room),
+		conns: make(map[uint32]*serverConn),
 	}
 }
 
@@ -51,28 +29,44 @@ func (s *Server)PutRoom(r *Room){
 	if _, ok := s.rooms[r.Id()]; ok {
 		panic(fmt.Errorf("Room(%d) already exists", r.Id()))
 	}
-	s.rooms[r.Id()] = &serverRoom{Room: r}
-}
-
-func (s *Server)GetRoom(id uint32)(r *Room){
-	r0, ok := s.rooms[id]
-	if ok {
-		r = r0.Room
-	}
-	return
+	s.rooms[r.Id()] = r
 }
 
 func (s *Server)PopRoom(id uint32)(r *Room){
-	r0, ok := s.rooms[id]
-	if !ok {
-		return
-	}
-	delete(s.rooms, id)
-	r = r0.Room
-	for _, sc := range r0.conns {
-		sc.leaveRoom(id)
+	r, ok := s.rooms[id]
+	if ok {
+		delete(s.rooms, id)
 	}
 	return
+}
+
+func (s *Server)GetRoom(id uint32)(r *Room){
+	return s.rooms[id]
+}
+
+func (s *Server)putConn(sc *serverConn)(bool){
+	if _, ok := s.conns[sc.mem.Id()]; ok {
+		return false
+	}
+	s.conns[sc.mem.Id()] = sc
+	return true
+}
+
+func (s *Server)PopConn(mid uint32)(ok bool){
+	var sc *serverConn
+	if sc, ok = s.conns[mid]; ok {
+		delete(s.conns, mid)
+		sc.free()
+	}
+	return
+}
+
+func (s *Server)Kick(rid uint32, mid uint32, reason string)(err error){
+	sc, ok := s.conns[mid]
+	if !ok {
+		return fmt.Errorf("Member(%d) connection is not exists", mid)
+	}
+	return sc.KickRoom(rid, reason)
 }
 
 type serverConn struct{
@@ -89,9 +83,6 @@ func (s *serverConn)checkBinded(){
 }
 
 func (s *serverConn)free(){
-	for _, r := range s.server.rooms {
-		r.pop(s)
-	}
 	s.mem = nil
 	s.conn.Close()
 	for _, c := range s.rconn {
@@ -101,18 +92,17 @@ func (s *serverConn)free(){
 
 func (s *serverConn)joinRoom(id uint32)(r *Room, err error){
 	s.checkBinded()
-	r0, ok := s.server.rooms[id]
+	r, ok := s.server.rooms[id]
 	if !ok {
 		return nil, fmt.Errorf("Room(%d) not exists", id)
 	}
-	if !r0.put(s) {
+	if !r.put(s.mem) {
 		return nil, fmt.Errorf("Member(%d) already exists", s.mem.Id())
 	}
-	r = r0.Room
 	return
 }
 
-func (s *serverConn)LeaveRoom(id uint32, reason string)(err error){
+func (s *serverConn)KickRoom(id uint32, reason string)(err error){
 	if err = s.leaveRoom(id); err != nil {
 		return
 	}
@@ -128,9 +118,8 @@ func (s *serverConn)leaveRoom(id uint32)(err error){
 	if !ok {
 		return fmt.Errorf("Room(%d) is not connected", id)
 	}
-	s.closeConn(id)
-	r.pop(s)
-	return
+	r.pop(s.mem.Id())
+	return s.closeConn(id)
 }
 
 func (s *serverConn)getRoomConn(id uint32)(c net.Conn){
@@ -148,7 +137,7 @@ func (s *serverConn)dial(id uint32)(err error){
 		return fmt.Errorf("Room(%d) is already connected", id)
 	}
 	var conn *net.TCPConn
-	if conn, err = net.DialTCP("tcp", nil, r.target); err != nil {
+	if conn, err = net.DialTCP("tcp", nil, r.Target()); err != nil {
 		return
 	}
 	s.rconn[id] = conn
@@ -179,7 +168,7 @@ func (s *serverConn)serve()(err error){
 	return s.conn.Serve()
 }
 
-func (s *Server)Serve()(err error){
+func (s *Server)ListenAndServe()(err error){
 	var listener *net.TCPListener
 	listener, err = net.ListenTCP("tcp", s.Addr)
 	if err != nil {
