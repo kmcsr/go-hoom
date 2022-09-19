@@ -2,7 +2,9 @@
 package hoom
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net"
 
 	"github.com/kmcsr/go-pio"
@@ -73,7 +75,7 @@ type serverConn struct{
 	server *Server
 	conn *pio.Conn
 	mem *Member
-	rconn map[uint32]net.Conn
+	conns map[uint32]net.Conn
 }
 
 func (s *serverConn)checkBinded(){
@@ -85,7 +87,7 @@ func (s *serverConn)checkBinded(){
 func (s *serverConn)free(){
 	s.mem = nil
 	s.conn.Close()
-	for _, c := range s.rconn {
+	for _, c := range s.conns {
 		c.Close()
 	}
 }
@@ -122,35 +124,65 @@ func (s *serverConn)leaveRoom(id uint32)(err error){
 	return s.closeConn(id)
 }
 
-func (s *serverConn)getRoomConn(id uint32)(c net.Conn){
+func (s *serverConn)getConn(id uint32)(c net.Conn){
 	s.checkBinded()
-	return s.rconn[id]
+	return s.conns[id]
 }
 
-func (s *serverConn)dial(id uint32)(err error){
+func (s *serverConn)dial(id uint32)(ses uint32, err error){
 	s.checkBinded()
 	r, ok := s.server.rooms[id]
 	if !ok {
-		return fmt.Errorf("Room(%d) not exists", id)
-	}
-	if _, ok := s.rconn[id]; ok {
-		return fmt.Errorf("Room(%d) is already connected", id)
+		err = fmt.Errorf("Room(%d) not exists", id)
+		return
 	}
 	var conn *net.TCPConn
 	if conn, err = net.DialTCP("tcp", nil, r.Target()); err != nil {
 		return
 	}
-	s.rconn[id] = conn
+	ses = 0
+	for {
+		ses++
+		if _, ok := s.conns[ses]; !ok {
+			break
+		}
+	}
+	go func(){
+		defer conn.Close()
+		var (
+			buf = make([]byte, 1024 * 128) // 128 KB
+			n int
+			err error
+		)
+		for {
+			if n, err = conn.Read(buf); err != nil {
+				if err == io.EOF || errors.Is(err, net.ErrClosed) {
+					err = nil
+				}
+				break
+			}
+			if err = s.conn.Send(&SsendPkt{
+				ConnId: ses,
+				Data: buf[:n],
+			}); err != nil {
+				break
+			}
+		}
+		if err != nil {
+			println(err.Error())
+		}
+	}()
+	s.conns[ses] = conn
 	return
 }
 
 func (s *serverConn)closeConn(id uint32)(err error){
 	s.checkBinded()
-	c, ok := s.rconn[id]
+	c, ok := s.conns[id]
 	if !ok {
 		return
 	}
-	delete(s.rconn, id)
+	delete(s.conns, id)
 	return c.Close()
 }
 
@@ -186,7 +218,7 @@ func (s *Server)ListenAndServe()(err error){
 		cs := &serverConn{
 			server: s,
 			conn: pio.NewConn(c, c),
-			rconn: make(map[uint32]net.Conn),
+			conns: make(map[uint32]net.Conn),
 		}
 		go cs.serve()
 	}

@@ -4,3 +4,6 @@
 
 # test
 /test/*
+
+# workspace
+go.work

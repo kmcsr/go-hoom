@@ -44,6 +44,7 @@ func (m *Member)ParseFrom(r encoding.Reader)(err error){
 	if m.name, err = r.ReadString(); err != nil {
 		return
 	}
+	// TODO: check member valid
 	return
 }
 
@@ -59,8 +60,8 @@ type Room struct{
 	members map[uint32]*Member
 }
 
-func NewRoom(id uint32, name string, server *Server, target *net.TCPAddr)(*Room){
-	return &Room{
+func NewRoom(id uint32, name string, server *Server, target *net.TCPAddr)(r *Room){
+	r = &Room{
 		id: id,
 		name: name,
 		owned: true,
@@ -69,6 +70,8 @@ func NewRoom(id uint32, name string, server *Server, target *net.TCPAddr)(*Room)
 		owner: server.owner,
 		members: make(map[uint32]*Member),
 	}
+	server.PutRoom(r)
+	return
 }
 
 func (r *Room)Id()(uint32){
@@ -143,7 +146,7 @@ func (r *Room)ParseFrom(rd encoding.Reader)(err error){
 		return
 	}
 	owner := new(Member)
-	if err = r.owner.ParseFrom(rd); err != nil {
+	if err = owner.ParseFrom(rd); err != nil {
 		return
 	}
 	r.owner = owner

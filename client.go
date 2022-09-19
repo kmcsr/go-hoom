@@ -2,7 +2,6 @@
 package hoom
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net"
@@ -14,14 +13,15 @@ import (
 
 
 type connRoom struct{
-	*Room
+	room uint32
 	w io.Writer
 }
 
 type Client struct{
 	mem *Member
 	conn *pio.Conn
-	rooms map[uint32]connRoom
+	rooms map[uint32]*Room
+	conns map[uint32]connRoom
 }
 
 func NewClient(m *Member, addr *net.TCPAddr)(c *Client, err error){
@@ -33,12 +33,15 @@ func NewClient(m *Member, addr *net.TCPAddr)(c *Client, err error){
 	c = &Client{
 		mem: m,
 		conn: pio.NewConn(conn, conn),
+		rooms: make(map[uint32]*Room),
+		conns: make(map[uint32]connRoom),
 	}
 	go c.serve()
 	if err = c.conn.Send(&CbindPkt{
 		Mem: m,
 	}); err != nil {
-		return
+		c.conn.Close()
+		return nil, err
 	}
 	return
 }
@@ -47,17 +50,25 @@ func (c *Client)Ping()(ping time.Duration, err error){
 	return c.conn.Ping()
 }
 
-func (c *Client)GetRoom(id uint32)(r *Room){
-	if rc, ok := c.rooms[id]; ok {
-		r = rc.Room
+func (c *Client)Close()(error){
+	return c.conn.Close()
+}
+
+func (c *Client)Rooms()(rooms []*Room){
+	for _, r := range c.rooms {
+		rooms = append(rooms, r)
 	}
 	return
+}
+
+func (c *Client)GetRoom(id uint32)(r *Room){
+	return c.rooms[id]
 }
 
 func (c *Client)Disconnect(id uint32)(err error){
 	if _, ok := c.pop(id); ok {
 		if err = c.conn.Send(&CclosePkt{
-			RoomId: id,
+			ConnId: id,
 		}); err != nil {
 			return
 		}
@@ -66,8 +77,8 @@ func (c *Client)Disconnect(id uint32)(err error){
 }
 
 func (c *Client)pop(id uint32)(rc connRoom, ok bool){
-	if rc, ok = c.rooms[id]; ok {
-		delete(c.rooms, id)
+	if rc, ok = c.conns[id]; ok {
+		delete(c.conns, id)
 	}
 	return
 }
@@ -78,6 +89,7 @@ func (c *Client)initConn(){
 	c.conn.AddPacket(func()(pio.PacketBase){ return &SleavePkt {c: c} })
 	c.conn.AddPacket(func()(pio.PacketBase){ return &SleaveBPkt{c: c} })
 	c.conn.AddPacket(func()(pio.PacketBase){ return &SerrorPkt {c: c} })
+	c.conn.AddPacket(func()(pio.PacketBase){ return &SdialPkt  {c: c} })
 	c.conn.AddPacket(func()(pio.PacketBase){ return &SclosePkt {c: c} })
 	c.conn.AddPacket(func()(pio.PacketBase){ return &SsendPkt  {c: c} })
 }
@@ -87,11 +99,7 @@ func (c *Client)serve()(err error){
 	return c.conn.Serve()
 }
 
-func (c *Client)Dial(id uint32, rw io.ReadWriter)(err error){
-	return c.DialWith(context.Background(), id, rw)
-}
-
-func (c *Client)DialWith(ctx context.Context, id uint32, rw io.ReadWriter)(err error){
+func (c *Client)Join(id uint32)(err error){
 	var res pio.PacketBase
 	if res, err = c.conn.Ask(&CjoinPkt{
 		RoomId: id,
@@ -103,41 +111,59 @@ func (c *Client)DialWith(ctx context.Context, id uint32, rw io.ReadWriter)(err e
 	case *SjoinPkt:
 		room = rs.Room
 	case *SerrorPkt:
-		return fmt.Errorf(rs.Error)
+		return fmt.Errorf("Dial error: %s", rs.Error)
 	default:
 		panic("Unexpected result")
 	}
-	c.rooms[id] = connRoom{room, rw}
+	c.rooms[id] = room
+	return
+}
 
-	ch := make(chan struct{})
+func (c *Client)Dial(id uint32, rw io.ReadWriter)(ses uint32, done <-chan error, err error){
+	var res pio.PacketBase
+	if res, err = c.conn.Ask(&CdialPkt{
+		RoomId: id,
+	}); err != nil {
+		return
+	}
+	switch rs := res.(type) {
+	case *SdialPkt:
+		ses = rs.ConnId
+	case *SerrorPkt:
+		err = fmt.Errorf("Dial error: %s", rs.Error)
+		return
+	default:
+		panic("Unexpected result")
+	}
+	c.conns[ses] = connRoom{id, rw}
+
+	ch := make(chan error, 1)
+	done = ch
 	go func(){
+		defer c.Disconnect(ses)
 		defer close(ch)
 		var (
-			buf = make([]byte, 1024 * 64)
+			buf = make([]byte, 1024 * 128) // 128 KB
 			n int
 			er error
 		)
 		for {
 			if n, er = rw.Read(buf); er != nil {
+				if er == io.EOF {
+					er = nil
+				}
 				break
 			}
 			if er = c.conn.Send(&CsendPkt{
-				RoomId: room.Id(),
+				ConnId: ses,
 				Data: buf[:n],
 			}); er != nil {
 				break
 			}
 		}
 		if er != nil {
-			err = er
+			ch <- er
 		}
 	}()
-	select {
-	case <-ch:
-	case <-ctx.Done():
-		close(ch)
-		err = ctx.Err()
-	}
 	return
 }
-

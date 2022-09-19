@@ -31,12 +31,12 @@ type (
 		s *serverConn
 	}
 	CclosePkt struct{
-		RoomId uint32
+		ConnId uint32
 
 		s *serverConn
 	}
 	CsendPkt struct{
-		RoomId uint32
+		ConnId uint32
 		Data []byte
 
 		s *serverConn
@@ -72,13 +72,18 @@ type (
 
 		c *Client
 	}
+	SdialPkt struct{
+		ConnId uint32
+
+		c *Client
+	}
 	SclosePkt struct{
-		RoomId uint32
+		ConnId uint32
 
 		c *Client
 	}
 	SsendPkt struct{
-		RoomId uint32
+		ConnId uint32
 		Data []byte
 
 		c *Client
@@ -196,36 +201,40 @@ func (p *CdialPkt)ParseFrom(r encoding.Reader)(err error){
 }
 
 func (p *CdialPkt)Ask()(res pio.PacketBase, err error){
-	if e := p.s.dial(p.RoomId); e != nil {
+	ses, e := p.s.dial(p.RoomId)
+	if e != nil {
 		res = &SerrorPkt{
 			Error: e.Error(),
 		}
 		return
 	}
+	res = &SdialPkt{
+		ConnId: ses,
+	}
 	return
 }
 
 func (p *CclosePkt)WriteTo(w encoding.Writer)(err error){
-	if err = w.WriteUint32(p.RoomId); err != nil {
+	if err = w.WriteUint32(p.ConnId); err != nil {
 		return
 	}
 	return
 }
 
 func (p *CclosePkt)ParseFrom(r encoding.Reader)(err error){
-	if p.RoomId, err = r.ReadUint32(); err != nil {
+	if p.ConnId, err = r.ReadUint32(); err != nil {
 		return
 	}
 	return
 }
 
 func (p *CclosePkt)Trigger()(err error){
-	panic("TODO")
+	err = p.s.closeConn(p.ConnId)
 	return
 }
 
 func (p *CsendPkt)WriteTo(w encoding.Writer)(err error){
-	if err = w.WriteUint32(p.RoomId); err != nil {
+	if err = w.WriteUint32(p.ConnId); err != nil {
 		return
 	}
 	if err = w.WriteBytes(p.Data); err != nil {
@@ -235,7 +244,7 @@ func (p *CsendPkt)WriteTo(w encoding.Writer)(err error){
 }
 
 func (p *CsendPkt)ParseFrom(r encoding.Reader)(err error){
-	if p.RoomId, err = r.ReadUint32(); err != nil {
+	if p.ConnId, err = r.ReadUint32(); err != nil {
 		return
 	}
 	if p.Data, err = r.ReadBytes(); err != nil {
@@ -245,11 +254,14 @@ func (p *CsendPkt)ParseFrom(r encoding.Reader)(err error){
 }
 
 func (p *CsendPkt)Trigger()(err error){
-	conn := p.s.getRoomConn(p.RoomId)
+	conn := p.s.getConn(p.ConnId)
 	if conn == nil {
-		panic(fmt.Errorf("Room(%d) not conntected", p.RoomId))
+		return fmt.Errorf("Room(%d) not conntected", p.ConnId)
 	}
 	_, err = conn.Write(p.Data)
+	if err != nil {
+		panic(err)
+	}
 	return
 }
 
@@ -260,6 +272,7 @@ var (
 	_ pio.PacketBase = (*SleavePkt)(nil)
 	_ pio.Packet     = (*SleaveBPkt)(nil)
 	_ pio.PacketBase = (*SerrorPkt)(nil)
+	_ pio.PacketBase = (*SdialPkt)(nil)
 	_ pio.Packet     = (*SclosePkt)(nil)
 	_ pio.Packet     = (*SsendPkt)(nil)
 )
@@ -269,8 +282,9 @@ func (p *SjoinBPkt) PktId()(uint32){ return 0x92 }
 func (p *SleavePkt) PktId()(uint32){ return 0x93 }
 func (p *SleaveBPkt)PktId()(uint32){ return 0x94 }
 func (p *SerrorPkt) PktId()(uint32){ return 0x95 }
-func (p *SclosePkt) PktId()(uint32){ return 0x96 }
-func (p *SsendPkt)  PktId()(uint32){ return 0x97 }
+func (p *SdialPkt)  PktId()(uint32){ return 0x96 }
+func (p *SclosePkt) PktId()(uint32){ return 0x97 }
+func (p *SsendPkt)  PktId()(uint32){ return 0x98 }
 
 func (p *SjoinPkt)WriteTo(w encoding.Writer)(err error){
 	if err = p.Room.WriteTo(w); err != nil {
@@ -366,15 +380,29 @@ func (p *SerrorPkt)ParseFrom(r encoding.Reader)(err error){
 	return
 }
 
+func (p *SdialPkt)WriteTo(w encoding.Writer)(err error){
+	if err = w.WriteUint32(p.ConnId); err != nil {
+		return
+	}
+	return
+}
+
+func (p *SdialPkt)ParseFrom(r encoding.Reader)(err error){
+	if p.ConnId, err = r.ReadUint32(); err != nil {
+		return
+	}
+	return
+}
+
 func (p *SclosePkt)WriteTo(w encoding.Writer)(err error){
-	if err = w.WriteUint32(p.RoomId); err != nil {
+	if err = w.WriteUint32(p.ConnId); err != nil {
 		return
 	}
 	return
 }
 
 func (p *SclosePkt)ParseFrom(r encoding.Reader)(err error){
-	if p.RoomId, err = r.ReadUint32(); err != nil {
+	if p.ConnId, err = r.ReadUint32(); err != nil {
 		return
 	}
 	return
@@ -386,7 +414,7 @@ func (p *SclosePkt)Trigger()(err error){
 }
 
 func (p *SsendPkt)WriteTo(w encoding.Writer)(err error){
-	if err = w.WriteUint32(p.RoomId); err != nil {
+	if err = w.WriteUint32(p.ConnId); err != nil {
 		return
 	}
 	if err = w.WriteBytes(p.Data); err != nil {
@@ -396,7 +424,7 @@ func (p *SsendPkt)WriteTo(w encoding.Writer)(err error){
 }
 
 func (p *SsendPkt)ParseFrom(r encoding.Reader)(err error){
-	if p.RoomId, err = r.ReadUint32(); err != nil {
+	if p.ConnId, err = r.ReadUint32(); err != nil {
 		return
 	}
 	if p.Data, err = r.ReadBytes(); err != nil {
@@ -406,8 +434,9 @@ func (p *SsendPkt)ParseFrom(r encoding.Reader)(err error){
 }
 
 func (p *SsendPkt)Trigger()(err error){
-	r, ok := p.c.rooms[p.RoomId]
+	r, ok := p.c.conns[p.ConnId]
 	if !ok {
+		panic(fmt.Errorf("Connid(%d) not exists", p.ConnId))
 		return
 	}
 	if _, err = r.w.Write(p.Data); err != nil {
