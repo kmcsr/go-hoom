@@ -2,10 +2,12 @@
 package hoom
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"github.com/kmcsr/go-pio"
 )
@@ -14,11 +16,12 @@ type Server struct{
 	Addr *net.TCPAddr
 
 	owner *Member
+	roomc uint32
 	rooms map[uint32]*Room
 	conns map[uint32]*serverConn
 }
 
-func NewServer(addr *net.TCPAddr, owner *Member)(*Server){
+func (owner *Member)NewServer(addr *net.TCPAddr)(*Server){
 	return &Server{
 		Addr: addr,
 		owner: owner,
@@ -27,17 +30,40 @@ func NewServer(addr *net.TCPAddr, owner *Member)(*Server){
 	}
 }
 
-func (s *Server)PutRoom(r *Room){
-	if _, ok := s.rooms[r.Id()]; ok {
-		panic(fmt.Errorf("Room(%d) already exists", r.Id()))
+func (s *Server)NewRoom(name string, target *net.TCPAddr)(r *Room){
+	s.roomc++
+	id := s.roomc
+	for {
+		if _, ok := s.rooms[id]; !ok {
+			break
+		}
+		id++
 	}
-	s.rooms[r.Id()] = r
+	r = &Room{
+		id: id,
+		name: name,
+		owned: true,
+		server: s,
+		target: target,
+		owner: s.owner,
+		members: make(map[uint32]*Member),
+	}
+	s.rooms[id] = r
+	return
 }
 
 func (s *Server)PopRoom(id uint32)(r *Room){
 	r, ok := s.rooms[id]
 	if ok {
 		delete(s.rooms, id)
+	}
+	return
+}
+
+func (s *Server)Rooms()(rooms []*Room){
+	rooms = make([]*Room, 0, len(s.rooms))
+	for _, r := range s.rooms {
+		rooms = append(rooms, r)
 	}
 	return
 }
@@ -85,6 +111,9 @@ func (s *serverConn)checkBinded(){
 }
 
 func (s *serverConn)free(){
+	for _, r := range s.server.rooms {
+		r.pop(s.mem.Id())
+	}
 	s.mem = nil
 	s.conn.Close()
 	for _, c := range s.conns {
@@ -169,7 +198,8 @@ func (s *serverConn)dial(id uint32)(ses uint32, err error){
 			}
 		}
 		if err != nil {
-			println(err.Error())
+			// TODO: Logger
+			println("error", err.Error())
 		}
 	}()
 	s.conns[ses] = conn
@@ -197,6 +227,7 @@ func (s *serverConn)initConn(){
 
 func (s *serverConn)serve()(err error){
 	s.initConn()
+	defer s.free()
 	return s.conn.Serve()
 }
 
@@ -215,12 +246,36 @@ func (s *Server)ListenAndServe()(err error){
 		if err != nil {
 			return
 		}
+		// TODO: Logger
+		fmt.Println("debug", "Client accepted:", c.RemoteAddr())
 		cs := &serverConn{
 			server: s,
 			conn: pio.NewConn(c, c),
 			conns: make(map[uint32]net.Conn),
 		}
 		go cs.serve()
+		go func(){
+			defer cs.conn.Close()
+			for {
+				select {
+				case <-cs.conn.Context().Done():
+					return
+				case <-time.After(10 * time.Second):
+					ctx, cancel := context.WithTimeout(cs.conn.Context(), 15 * time.Second)
+					ping, err := cs.conn.PingWith(ctx)
+					cancel()
+					if err != nil {
+						if errors.Is(err, context.Canceled) {
+							return
+						}
+						// TODO: Logger
+						fmt.Println("debug", "Ping error:", err)
+						return
+					}
+					_ = ping // TODO: Save client pings
+				}
+			}
+		}()
 	}
 	return nil
 }

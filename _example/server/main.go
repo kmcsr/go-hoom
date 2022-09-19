@@ -10,13 +10,11 @@ import (
 var localhost = net.IPv4(127, 0, 0, 1)
 var server_addr = &net.TCPAddr{IP: localhost, Port: 12348}
 
-const roomid = 0xab
-
 func main(){
 	owner := hoom.NewMember(0x01, "example-owner")
-	server := hoom.NewServer(server_addr, owner)
-	room := hoom.NewRoom(roomid, "example-room", server, &net.TCPAddr{IP: localhost, Port: 25565})
-	_  = room
+	server := owner.NewServer(server_addr)
+	room := server.NewRoom("example-room", &net.TCPAddr{IP: localhost, Port: 25565})
+	println("new room id:", room.Id())
 	println("server.ListenAndServe")
 	server.ListenAndServe()
 }

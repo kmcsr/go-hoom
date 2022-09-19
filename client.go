@@ -2,12 +2,12 @@
 package hoom
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"time"
 
-	// "github.com/kmcsr/go-pio/encoding"
 	"github.com/kmcsr/go-pio"
 )
 
@@ -24,9 +24,9 @@ type Client struct{
 	conns map[uint32]connRoom
 }
 
-func NewClient(m *Member, addr *net.TCPAddr)(c *Client, err error){
+func (m *Member)DialServer(server *net.TCPAddr)(c *Client, err error){
 	var conn *net.TCPConn
-	conn, err = net.DialTCP("tcp", nil, addr)
+	conn, err = net.DialTCP("tcp", nil, server)
 	if err != nil {
 		return
 	}
@@ -36,7 +36,8 @@ func NewClient(m *Member, addr *net.TCPAddr)(c *Client, err error){
 		rooms: make(map[uint32]*Room),
 		conns: make(map[uint32]connRoom),
 	}
-	go c.serve()
+	c.initConn()
+	go c.conn.Serve()
 	if err = c.conn.Send(&CbindPkt{
 		Mem: m,
 	}); err != nil {
@@ -52,6 +53,10 @@ func (c *Client)Ping()(ping time.Duration, err error){
 
 func (c *Client)Close()(error){
 	return c.conn.Close()
+}
+
+func (c *Client)Context()(context.Context){
+	return c.conn.Context()
 }
 
 func (c *Client)Rooms()(rooms []*Room){
@@ -92,11 +97,6 @@ func (c *Client)initConn(){
 	c.conn.AddPacket(func()(pio.PacketBase){ return &SdialPkt  {c: c} })
 	c.conn.AddPacket(func()(pio.PacketBase){ return &SclosePkt {c: c} })
 	c.conn.AddPacket(func()(pio.PacketBase){ return &SsendPkt  {c: c} })
-}
-
-func (c *Client)serve()(err error){
-	c.initConn()
-	return c.conn.Serve()
 }
 
 func (c *Client)Join(id uint32)(err error){

@@ -11,12 +11,12 @@ import (
 
 var localhost = net.IPv4(127, 0, 0, 1)
 
-const roomid = 0xab
+const roomid = 0x01
 
 func main(){
 	target := &net.TCPAddr{IP: localhost, Port: 12348}
 	user := hoom.NewMember(0x02, "example-user")
-	client, err := hoom.NewClient(user, target)
+	client, err := user.DialServer(target)
 	must(err)
 	defer client.Close()
 	fmt.Println("Client connected", target)
@@ -24,9 +24,9 @@ func main(){
 	must(err)
 	fmt.Println("Ping:", ping)
 
-	// err = client.Join(roomid)
-	// must(err)
-	// fmt.Println("Joined room", roomid)
+	err = client.Join(roomid)
+	must(err)
+	fmt.Println("Joined room", roomid)
 
 	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: localhost, Port: 12347})
 	must(err)

@@ -60,20 +60,6 @@ type Room struct{
 	members map[uint32]*Member
 }
 
-func NewRoom(id uint32, name string, server *Server, target *net.TCPAddr)(r *Room){
-	r = &Room{
-		id: id,
-		name: name,
-		owned: true,
-		server: server,
-		target: target,
-		owner: server.owner,
-		members: make(map[uint32]*Member),
-	}
-	server.PutRoom(r)
-	return
-}
-
 func (r *Room)Id()(uint32){
 	return r.id
 }
