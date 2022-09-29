@@ -17,7 +17,7 @@ func (TextCommander)Execute(cmd string, fields ...string)(res string, err error)
 	}
 	resn, err := c.Execute(fields...)
 	if err != nil {
-		return
+		return fmt.Sprintln("error", err), nil
 	}
 	return fmt.Sprintln(resn...), nil
 }

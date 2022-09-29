@@ -48,6 +48,24 @@ func (m *Member)ParseFrom(r encoding.Reader)(err error){
 	return
 }
 
+type AuthedMember struct{
+	Member
+	token string
+}
+
+func LogMember(id uint32, name string)(*AuthedMember){
+	return &AuthedMember{
+		Member: Member{
+			id: id,
+			name: name,
+		},
+	}
+}
+
+func (m *AuthedMember)GetMem()(*Member){
+	return &m.Member
+}
+
 
 type Room struct{
 	id uint32
@@ -170,5 +188,44 @@ func (r *Room)GetMember(id uint32)(m *Member){
 func (r *Room)Kick(id uint32, reason string)(err error){
 	r.checkOwned()
 	return r.server.Kick(r.id, id, reason)
+}
+
+type RoomToken struct{
+	RoomId uint32
+	MemId uint32
+	Token uint64
+	Sign []byte
+}
+
+func (t *RoomToken)WriteTo(w encoding.Writer)(err error){
+	if err = w.WriteUint32(t.RoomId); err != nil {
+		return
+	}
+	if err = w.WriteUint32(t.MemId); err != nil {
+		return
+	}
+	if err = w.WriteUint64(t.Token); err != nil {
+		return
+	}
+	if err = w.WriteBytes(t.Sign); err != nil {
+		return
+	}
+	return
+}
+
+func (t *RoomToken)ParseFrom(r encoding.Reader)(err error){
+	if t.RoomId, err = r.ReadUint32(); err != nil {
+		return
+	}
+	if t.MemId, err = r.ReadUint32(); err != nil {
+		return
+	}
+	if t.Token, err = r.ReadUint64(); err != nil {
+		return
+	}
+	if t.Sign, err = r.ReadBytes(); err != nil {
+		return
+	}
+	return
 }
 

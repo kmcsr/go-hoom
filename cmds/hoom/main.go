@@ -4,6 +4,7 @@ package main
 import (
 	"bufio"
 	"flag"
+	"fmt"
 	"io"
 	// "net"
 	"os"
@@ -27,13 +28,26 @@ func init(){
 	flag.StringVar(&username, "username", "", "client user name")
 	flag.StringVar(&userid, "userid", "", "client user id")
 	flag.StringVar(&loginToken, "token", "", "login token")
+	flag.Usage = func(){
+		out := flag.CommandLine.Output()
+		fmt.Fprintln(out, "Usage of Hoom-cli:")
+		fmt.Fprintln(out, cliUsage)
+		fmt.Fprintln(out, "Args:")
+		flag.CommandLine.PrintDefaults()
+		fmt.Fprintln(out, "Commands:")
+		fmt.Fprint(out, cliCommandsUsage)
+	}
 	flag.Parse()
+	if len(username) == 0 || len(userid) == 0/* || len(loginToken) == 0 */{
+		flag.Usage()
+		os.Exit(2)
+	}
 	// TODO: log in user
 	uid, err := strconv.ParseUint(userid, 10, 32)
 	if err != nil {
-		panic(err)
+		panic("Cannot parse userid: " + err.Error())
 	}
-	loggedUser = hoom.NewMember((uint32)(uid), username)
+	loggedUser = hoom.LogMember((uint32)(uid), username)
 }
 
 func main(){

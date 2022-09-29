@@ -42,21 +42,28 @@ func (EchoCmd)Execute(fields ...string)(resn []interface{}, err error){
 }
 
 func (ServeCmd)Execute(fields ...string)(resn []interface{}, err error){
-	if len(fields) != 1 {
+	if len(fields) > 1 {
 		return nil, FieldsNumWrong
 	}
-	addr := fields[0]
-	tcpaddr, err := net.ResolveTCPAddr("tcp", addr)
-	if err != nil {
-		return
+	var tcpaddr *net.TCPAddr = nil
+	if len(fields) >= 1 {
+		addr := fields[0]
+		tcpaddr, err = net.ResolveTCPAddr("tcp", addr)
+		if err != nil {
+			return
+		}
 	}
 	if hoomServer != nil {
 		return nil, errors.New("Server already started")
 	}
 	server := loggedUser.NewServer(tcpaddr)
+	if err = server.Listen(); err != nil {
+		return
+	}
+	resn = append(resn, server.ListenAddr().String())
 	hoomServer = server
 	go func(){
-		if err := server.ListenAndServe(); err != nil {
+		if err := server.Serve(); err != nil {
 			panic(err)
 		}
 	}()
@@ -97,7 +104,7 @@ func (JoinCmd)Execute(fields ...string)(resn []interface{}, err error){
 	netap := tcpaddr.AddrPort()
 	client, ok := hoomClients[netap]
 	if !ok {
-		if client, err = loggedUser.DialServer(tcpaddr); err != nil {
+		if client, err = loggedUser.Dial(tcpaddr); err != nil {
 			return
 		}
 		hoomClients[netap] = client
@@ -134,11 +141,21 @@ func (JoinCmd)Execute(fields ...string)(resn []interface{}, err error){
 				panic(err)
 				return
 			}
-			_, _, err = client.Dial((uint32)(roomid), conn)
-			if err != nil {
-				println("error Cannot dial room:", roomid, ":", err.Error())
-				return
-			}
+			go func(conn net.Conn){
+				rwc, err := client.Dial((uint32)(roomid))
+				if err != nil {
+					// TODO: logger
+					println("error Cannot dial room:", roomid, ":", err.Error())
+					return
+				}
+				done := ioProxy(rwc, conn)
+				go func(){
+					select {
+					case <-done:
+						// TODO: after done
+					}
+				}()
+			}(conn)
 		}
 	}()
 	return
