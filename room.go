@@ -66,10 +66,15 @@ func (m *AuthedMember)GetMem()(*Member){
 	return &m.Member
 }
 
+type Desc struct{
+	Name string
+	Value string
+}
 
 type Room struct{
 	id uint32
 	name string
+	desc []Desc
 
 	owned bool
 	server *Server
@@ -88,6 +93,18 @@ func (r *Room)Name()(string){
 
 func (r *Room)SetName(name string){
 	r.name = name
+}
+
+func (r *Room)Desc()([]Desc){
+	return r.desc
+}
+
+func (r *Room)SetDesc(desc []Desc){
+	r.desc = desc
+}
+
+func (r *Room)AddDesc(desc Desc){
+	r.desc = append(r.desc, desc)
 }
 
 func (r *Room)Owner()(*Member){

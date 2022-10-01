@@ -39,7 +39,7 @@ func (m *AuthedMember)Dial(server *net.TCPAddr)(c *Client, err error){
 	}
 	c.jnitPacket()
 	c.conn.OnPktNotFound = func(id uint32, body encoding.Reader){
-		fmt.Println("debug", "Unexpected packet id:", id) // TODO: Logger.WARN
+		loger.Warn("hoom.Client: Unexpected packet id:", id)
 	}
 	go c.conn.Serve()
 	var res pio.PacketBase
@@ -50,12 +50,10 @@ func (m *AuthedMember)Dial(server *net.TCPAddr)(c *Client, err error){
 		return nil, err
 	}
 	switch rs := res.(type) {
+	case pio.Ok:
 	case *SerrorPkt:
 		return nil, fmt.Errorf("Cannot bind member: %s", rs.Error)
 	default:
-		if rs == pio.OkPkt {
-			break
-		}
 		panic("Unexpected result")
 	}
 	return
@@ -128,7 +126,7 @@ func (c *Client)dial()(conn *pio.Conn, err error){
 	conn = pio.NewConn(con, con)
 	conn.AddPacket(func()(pio.PacketBase){ return &SerrorPkt {} })
 	conn.OnPktNotFound = func(id uint32, body encoding.Reader){
-		fmt.Println("debug", "Unexpected packet id:", id) // TODO: Logger.WARN
+		loger.Warn("Unexpected packet id:", id)
 	}
 	go conn.Serve()
 	return
@@ -156,19 +154,15 @@ func (c *Client)Dial(id uint32)(conn io.ReadWriteCloser, err error){
 	}
 	if err == nil {
 		switch rs := res.(type) {
+		case pio.Ok:
 		case *SerrorPkt:
 			err = fmt.Errorf("Dial error: %s", rs.Error)
 			return
 		default:
-			if res == pio.OkPkt {
-				break
-			}
 			panic("Unexpected result")
 		}
 	}
-	select {
-	case <-con.StreamedDone():
-	}
+	loger.Trace("hoom.Client: pio.Conn streaming")
 	if conn, err = con.AsStream(); err != nil {
 		return
 	}

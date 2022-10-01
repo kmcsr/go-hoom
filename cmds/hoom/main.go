@@ -11,11 +11,13 @@ import (
 	"strings"
 	"strconv"
 
+  "github.com/kmcsr/go-logger"
 	"github.com/kmcsr/go-hoom"
 )
 
 var (
 	debug bool = false
+	trace bool = false
 	binary_mode bool = false
 	username string = ""
 	userid string = "" // do not use uint32, probably will change to uuid
@@ -24,6 +26,7 @@ var (
 
 func init(){
 	flag.BoolVar(&debug, "debug", debug, "enable debug messages")
+	flag.BoolVar(&trace, "trace", trace, "enable trace messages")
 	// flag.BoolVar(&binary_mode, "binary", binary_mode, "use binary rpc mode")
 	flag.StringVar(&username, "username", "", "client user name")
 	flag.StringVar(&userid, "userid", "", "client user id")
@@ -32,20 +35,32 @@ func init(){
 		out := flag.CommandLine.Output()
 		fmt.Fprintln(out, "Usage of Hoom-cli:")
 		fmt.Fprintln(out, cliUsage)
-		fmt.Fprintln(out, "Args:")
+		fmt.Fprintln(out, "Args:\n")
 		flag.CommandLine.PrintDefaults()
-		fmt.Fprintln(out, "Commands:")
+		fmt.Fprintln(out, "\nCommands:")
 		fmt.Fprint(out, cliCommandsUsage)
 	}
+
 	flag.Parse()
 	if len(username) == 0 || len(userid) == 0/* || len(loginToken) == 0 */{
 		flag.Usage()
 		os.Exit(2)
 	}
+
+	if trace {
+		debug = true
+	}
+	if debug {
+		loger.SetLevel(logger.DebugLevel)
+	}
+	if trace {
+		loger.SetLevel(logger.TraceLevel)
+	}
+
 	// TODO: log in user
 	uid, err := strconv.ParseUint(userid, 10, 32)
 	if err != nil {
-		panic("Cannot parse userid: " + err.Error())
+		loger.Panic("Cannot parse userid: " + err.Error())
 	}
 	loggedUser = hoom.LogMember((uint32)(uid), username)
 }
@@ -62,10 +77,10 @@ func main(){
 		cmd, fields = fields[0], fields[1:]
 		res, err := commander.Execute(cmd, fields...)
 		if err != nil {
-			panic(err)
+			loger.Panic(err)
 		}
 		if _, err = io.WriteString(os.Stdout, res); err != nil {
-			panic(err)
+			loger.Panic(err)
 		}
 	}
 }

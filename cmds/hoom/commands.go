@@ -3,6 +3,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"strconv"
 )
@@ -19,16 +20,25 @@ var commands = initCommands()
 
 type (
 	EchoCmd struct{}
+
+	// Server Side
 	ServeCmd struct{}
 	CreateRoomCmd struct{}
+	ListCmd struct{}
+
+	// Client Side
 	JoinCmd struct{}
+	QueryCmd struct{}
 )
 
 func initCommands()(cmds map[string]Command){
 	cmds = make(map[string]Command)
 	cmds["echo"] = EchoCmd{}
+
 	cmds["serve"] = ServeCmd{}
 	cmds["create"] = CreateRoomCmd{}
+	cmds["list"] = ListCmd{}
+
 	cmds["join"] = JoinCmd{}
 	return
 }
@@ -64,7 +74,7 @@ func (ServeCmd)Execute(fields ...string)(resn []interface{}, err error){
 	hoomServer = server
 	go func(){
 		if err := server.Serve(); err != nil {
-			panic(err)
+			loger.Panic(err)
 		}
 	}()
 	return
@@ -74,8 +84,8 @@ func (CreateRoomCmd)Execute(fields ...string)(resn []interface{}, err error){
 	if len(fields) != 2 {
 		return nil, FieldsNumWrong
 	}
-	name := fields[0]
-	tgadr := fields[1]
+	tgadr := fields[0]
+	name := fields[1]
 	target, err := net.ResolveTCPAddr("tcp", tgadr)
 	if err != nil {
 		return
@@ -85,6 +95,27 @@ func (CreateRoomCmd)Execute(fields ...string)(resn []interface{}, err error){
 	}
 	room := hoomServer.NewRoom(name, target)
 	resn = append(resn, room.Id())
+	return
+}
+
+func (ListCmd)Execute(fields ...string)(resn []interface{}, err error){
+	if len(fields) != 1 {
+		return nil, FieldsNumWrong
+	}
+	roomid, err := strconv.ParseUint(fields[0], 10, 32)
+	if err != nil {
+		return
+	}
+	if hoomServer == nil {
+		return nil, errors.New("Server not created")
+	}
+	room := hoomServer.GetRoom((uint32)(roomid))
+	if room == nil {
+		return nil, fmt.Errorf("Room(%d) not exists", roomid)
+	}
+	for _, m := range room.Members() {
+		resn = append(resn, fmt.Sprintf("%d:%s", m.Id(), m.Name()))
+	}
 	return
 }
 
@@ -138,21 +169,22 @@ func (JoinCmd)Execute(fields ...string)(resn []interface{}, err error){
 		for {
 			conn, err = listener.Accept()
 			if err != nil {
-				panic(err)
+				loger.Panic(err)
 				return
 			}
+			loger.Tracef("Accept conn %v", conn.RemoteAddr())
 			go func(conn net.Conn){
 				rwc, err := client.Dial((uint32)(roomid))
 				if err != nil {
-					// TODO: logger
-					println("error Cannot dial room:", roomid, ":", err.Error())
+					conn.Close()
+					loger.Errorf("Cannot dial room %d: %v", roomid, err.Error())
 					return
 				}
 				done := ioProxy(rwc, conn)
 				go func(){
 					select {
 					case <-done:
-						// TODO: after done
+						loger.Tracef("Conn %v was done", conn.RemoteAddr())
 					}
 				}()
 			}(conn)

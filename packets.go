@@ -100,14 +100,15 @@ func (p *CbindPkt)ParseFrom(r encoding.Reader)(err error){
 }
 
 func (p *CbindPkt)Ask()(res pio.PacketBase, err error){
-	p.conn.PopPacket(p.PktId())
 	// TODO: check member
+	loger.Tracef("hoom.Server: Member(%d) trying connect", p.Mem.Id())
 	cs := p.server.newServerConn(p.conn, p.Mem)
 	if cs == nil {
-		res = NewSerror(fmt.Errorf("Member already exists"))
-		return
+		return NewSerror(fmt.Errorf("Member already exists")), nil
 	}
 	p.alive()
+	loger.Debugf("hoom.Server: Member(%d) connected", p.Mem.Id())
+	memid := p.Mem.Id()
 	go func(){
 		defer cs.free()
 		for {
@@ -119,11 +120,10 @@ func (p *CbindPkt)Ask()(res pio.PacketBase, err error){
 				ping, err := cs.conn.PingWith(ctx)
 				cancel()
 				if err != nil {
+					loger.Debugf("Ping member(%d) error: %v", memid, err)
 					if errors.Is(err, context.Canceled) {
 						return
 					}
-					// TODO: Logger
-					fmt.Println("debug", "Ping error:", err)
 					return
 				}
 				_ = ping // TODO: Save client pings
@@ -221,21 +221,28 @@ func (p *CdialPkt)Ask()(res pio.PacketBase, err error){
 		return NewSerror(e), nil
 	}
 	p.alive()
+	con := p.conn
 	go func(){
-		rw, e := p.conn.AsStream()
+		loger.Debug("hoom.Server: Waiting pio.Conn streamed")
+		select {
+		case <-con.StreamedDone():
+		}
+		loger.Trace("hoom.Server: pio.Conn streaming")
+		rw, e := con.AsStream()
 		if e != nil {
 			conn.Close()
-			p.conn.Close()
+			con.Close()
 			return
 		}
 		const bufSize = 1024 * 32 // 32 KB
 		// TODO: use buf pool
 		// TODO: count connections
-		sc.putConn(roomid, p.conn)
+		sc.putConn(roomid, con)
+		loger.Debug("hoom.Server: Proxying pio.Conn and target")
 		go func(){
 			defer conn.Close()
 			defer rw.Close()
-			defer sc.popConn(roomid, p.conn)
+			defer sc.popConn(roomid, con)
 			buf := make([]byte, bufSize)
 			io.CopyBuffer(conn, rw, buf)
 		}()

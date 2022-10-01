@@ -42,6 +42,7 @@ func (s *Server)NewRoom(name string, target *net.TCPAddr)(r *Room){
 		}
 		id++
 	}
+	loger.Tracef("hoom.Server: Creating room id=%d name=%s target=%v", id, name, target)
 	r = &Room{
 		id: id,
 		name: name,
@@ -92,6 +93,10 @@ func (s *Server)Kick(rid uint32, mid uint32, reason string)(err error){
 	return sc.KickRoom(rid, reason)
 }
 
+func (s *Server)signToken(token *RoomToken)(err error){
+	return
+}
+
 type serverConn struct{
 	server *Server
 	conn *pio.Conn
@@ -120,6 +125,7 @@ func (s *serverConn)free(){
 	if s.mem == nil {
 		return
 	}
+	loger.Debugf("hoom.serverConn: Cleaning")
 	delete(s.server.conns, s.mem.Id())
 	for _, r := range s.server.rooms {
 		r.pop(s.mem.Id())
@@ -148,7 +154,9 @@ func (s *serverConn)joinRoom(id uint32)(r *Room, token *RoomToken, err error){
 		MemId: s.mem.Id(),
 		Token: RandUint64(),
 	}
-	// TODO: sign this token
+	if err = s.server.signToken(token); err != nil {
+		return
+	}
 	s.tokens[token.RoomId] = token.Token
 	return
 }
@@ -190,6 +198,7 @@ func (s *serverConn)leaveRoom(id uint32)(err error){
 	if _, ok := s.tokens[id]; !ok {
 		return fmt.Errorf("Room(%d) doesn't joined", id)
 	}
+	loger.Debugf("hoom.serverConn: Client is leaving room %d", id)
 	delete(s.tokens, id)
 	r.pop(s.mem.Id())
 	if cc, ok := s.conns[id]; ok {
@@ -216,10 +225,12 @@ func (s *serverConn)dial(id uint32)(conn net.Conn, err error){
 }
 
 func (s *serverConn)putConn(id uint32, conn *pio.Conn){
+	loger.Tracef("hoom.serverConn: a connection joined %d", id)
 	s.conns[id] = append(s.conns[id], conn)
 }
 
 func (s *serverConn)popConn(id uint32, conn *pio.Conn){
+	loger.Tracef("hoom.serverConn: a connection leaved %d", id)
 	conns := s.conns[id]
 	for i, c := range conns {
 		if c == conn {
@@ -240,6 +251,7 @@ func (s *Server)Listen()(err error){
 	if s.Listener, err = net.ListenTCP("tcp", s.Addr); err != nil {
 		return
 	}
+	loger.Debugf("hoom.Server is listing %v", s.Listener.Addr())
 	return
 }
 
@@ -247,6 +259,7 @@ func (s *Server)Shutdown()(err error){
 	if s.Listener == nil {
 		return
 	}
+	loger.Debug("hoom.Server is shuting down")
 	if err = s.Listener.Close(); err != nil {
 		return
 	}
@@ -275,7 +288,7 @@ func (s *Server)serveConn(c net.Conn){
 		alive: cancel,
 	} })
 	conn.OnPktNotFound = func(id uint32, body encoding.Reader){
-		fmt.Println("debug", "Unexpected packet id:", id) // TODO: Logger.WARN
+		loger.Warn("hoom.Server: Unexpected packet id:", id)
 	}
 	go conn.Serve()
 	go func(){
@@ -285,7 +298,9 @@ func (s *Server)serveConn(c net.Conn){
 			if errors.Is(alivectx.Err(), context.Canceled) {
 				return
 			}
+			loger.Debug("hoom.serverConn: Connection init activity timeout")
 		case <-conn.Context().Done():
+			loger.Debug("hoom.serverConn: Connection init activity canceled")
 		}
 		conn.Close()
 	}()
@@ -296,14 +311,14 @@ func (s *Server)Serve()(err error){
 	if listener == nil {
 		panic("Server need a listener")
 	}
+	loger.Debug("Serving hoom.Server")
 	for {
 		var c net.Conn
 		c, err = listener.Accept()
 		if err != nil {
 			return
 		}
-		// TODO: Logger
-		fmt.Println("debug", "Client accepted:", c.RemoteAddr())
+		loger.Debugf("Client accepted: %v", c.RemoteAddr())
 
 		s.serveConn(c)
 	}
