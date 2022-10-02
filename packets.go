@@ -85,15 +85,14 @@ func (p *CleavePkt)PktId()(uint32){ return 0x83 }
 func (p *CdialPkt) PktId()(uint32){ return 0x88 }
 
 func (p *CbindPkt)WriteTo(w encoding.Writer)(err error){
-	if err = p.Mem.WriteTo(w); err != nil {
+	if err = WriteMember(w, p.Mem); err != nil {
 		return
 	}
 	return
 }
 
 func (p *CbindPkt)ParseFrom(r encoding.Reader)(err error){
-	p.Mem = new(Member)
-	if err = p.Mem.ParseFrom(r); err != nil {
+	if p.Mem, err = ParseMember(r); err != nil {
 		return
 	}
 	return
@@ -278,7 +277,7 @@ func (p *SleaveBPkt)PktId()(uint32){ return 0x94 }
 func (p *SerrorPkt) PktId()(uint32){ return 0x95 }
 
 func (p *SjoinPkt)WriteTo(w encoding.Writer)(err error){
-	if err = p.Room.WriteTo(w); err != nil {
+	if err = WriteRoom(w, p.Room); err != nil {
 		return
 	}
 	if err = p.Token.WriteTo(w); err != nil {
@@ -288,8 +287,7 @@ func (p *SjoinPkt)WriteTo(w encoding.Writer)(err error){
 }
 
 func (p *SjoinPkt)ParseFrom(r encoding.Reader)(err error){
-	p.Room = new(Room)
-	if err = p.Room.ParseFrom(r); err != nil {
+	if p.Room, err = ParseRoom(r); err != nil {
 		return
 	}
 	p.Token = new(RoomToken)
@@ -303,7 +301,7 @@ func (p *SjoinBPkt)WriteTo(w encoding.Writer)(err error){
 	if err = w.WriteUint32(p.RoomId); err != nil {
 		return
 	}
-	if err = p.Mem.WriteTo(w); err != nil {
+	if err = WriteMember(w, p.Mem); err != nil {
 		return
 	}
 	return
@@ -313,8 +311,7 @@ func (p *SjoinBPkt)ParseFrom(r encoding.Reader)(err error){
 	if p.RoomId, err = r.ReadUint32(); err != nil {
 		return
 	}
-	p.Mem = new(Member)
-	if err = p.Mem.ParseFrom(r); err != nil {
+	if p.Mem, err = ParseMember(r); err != nil {
 		return
 	}
 	return

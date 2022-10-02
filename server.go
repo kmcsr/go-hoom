@@ -8,6 +8,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kmcsr/go-pio/encoding"
 	"github.com/kmcsr/go-pio"
 )
@@ -20,7 +21,7 @@ type Server struct{
 
 	owner *Member
 	roomc uint32
-	rooms map[uint32]*Room
+	rooms map[uint32]*ServerRoom
 	conns map[uint32]*serverConn
 }
 
@@ -28,12 +29,12 @@ func (m *AuthedMember)NewServer(addr *net.TCPAddr)(*Server){
 	return &Server{
 		Addr: addr,
 		owner: m.GetMem(),
-		rooms: make(map[uint32]*Room),
+		rooms: make(map[uint32]*ServerRoom),
 		conns: make(map[uint32]*serverConn),
 	}
 }
 
-func (s *Server)NewRoom(name string, target *net.TCPAddr)(r *Room){
+func (s *Server)NewRoom(name string, target *net.TCPAddr)(r *ServerRoom){
 	s.roomc++
 	id := s.roomc
 	for {
@@ -43,20 +44,16 @@ func (s *Server)NewRoom(name string, target *net.TCPAddr)(r *Room){
 		id++
 	}
 	loger.Tracef("hoom.Server: Creating room id=%d name=%s target=%v", id, name, target)
-	r = &Room{
-		id: id,
-		name: name,
-		owned: true,
+	r = &ServerRoom{
+		Room: NewRoom(id, s.owner, uuid.Nil, name),
 		server: s,
 		target: target,
-		owner: s.owner,
-		members: make(map[uint32]*Member),
 	}
 	s.rooms[id] = r
 	return
 }
 
-func (s *Server)PopRoom(id uint32)(r *Room){
+func (s *Server)PopRoom(id uint32)(r *ServerRoom){
 	r, ok := s.rooms[id]
 	if ok {
 		delete(s.rooms, id)
@@ -64,15 +61,15 @@ func (s *Server)PopRoom(id uint32)(r *Room){
 	return
 }
 
-func (s *Server)Rooms()(rooms []*Room){
-	rooms = make([]*Room, 0, len(s.rooms))
+func (s *Server)Rooms()(rooms []*ServerRoom){
+	rooms = make([]*ServerRoom, 0, len(s.rooms))
 	for _, r := range s.rooms {
 		rooms = append(rooms, r)
 	}
 	return
 }
 
-func (s *Server)GetRoom(id uint32)(r *Room){
+func (s *Server)GetRoom(id uint32)(r *ServerRoom){
 	return s.rooms[id]
 }
 
@@ -128,11 +125,10 @@ func (s *serverConn)free(){
 	loger.Debugf("hoom.serverConn: Cleaning")
 	delete(s.server.conns, s.mem.Id())
 	for _, r := range s.server.rooms {
-		r.pop(s.mem.Id())
+		r.Pop(s.mem.Id())
 	}
 	s.mem = nil
 	s.conn.Close()
-	s.conn = nil
 	for _, cc := range s.conns {
 		for _, c := range cc {
 			c.Close()
@@ -142,11 +138,12 @@ func (s *serverConn)free(){
 }
 
 func (s *serverConn)joinRoom(id uint32)(r *Room, token *RoomToken, err error){
-	r, ok := s.server.rooms[id]
+	sr, ok := s.server.rooms[id]
 	if !ok {
 		return nil, nil, fmt.Errorf("Room(%d) not exists", id)
 	}
-	if !r.put(s.mem) {
+	r = sr.Room
+	if !sr.Put(s.mem) {
 		return nil, nil, fmt.Errorf("Member(%d) already exists", s.mem.Id())
 	}
 	token = &RoomToken{
@@ -161,7 +158,7 @@ func (s *serverConn)joinRoom(id uint32)(r *Room, token *RoomToken, err error){
 	return
 }
 
-func (s *serverConn)checkToken(token *RoomToken)(r *Room, err error){
+func (s *serverConn)checkToken(token *RoomToken)(r *ServerRoom, err error){
 	if token.MemId != s.mem.Id() {
 		return nil, TokenNotValid
 	}
@@ -200,7 +197,7 @@ func (s *serverConn)leaveRoom(id uint32)(err error){
 	}
 	loger.Debugf("hoom.serverConn: Client is leaving room %d", id)
 	delete(s.tokens, id)
-	r.pop(s.mem.Id())
+	r.Pop(s.mem.Id())
 	if cc, ok := s.conns[id]; ok {
 		delete(s.conns, id)
 		for _, c := range cc {

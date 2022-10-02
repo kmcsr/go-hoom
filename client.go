@@ -16,13 +16,23 @@ import (
 type joinedRoom struct{
 	*Room
 	token *RoomToken
+
+	onunload func()
+}
+
+func newJoinedRoom(room *Room, token *RoomToken)(r *joinedRoom, err error){
+	r = &joinedRoom{
+		Room: room,
+		token: token,
+	}
+	return
 }
 
 type Client struct{
 	mem *AuthedMember
 	conn *pio.Conn
 	server *net.TCPAddr
-	rooms map[uint32]joinedRoom
+	rooms map[uint32]*joinedRoom
 }
 
 func (m *AuthedMember)Dial(server *net.TCPAddr)(c *Client, err error){
@@ -35,7 +45,7 @@ func (m *AuthedMember)Dial(server *net.TCPAddr)(c *Client, err error){
 		mem: m,
 		conn: pio.NewConn(conn, conn),
 		server: server,
-		rooms: make(map[uint32]joinedRoom),
+		rooms: make(map[uint32]*joinedRoom),
 	}
 	c.jnitPacket()
 	c.conn.OnPktNotFound = func(id uint32, body encoding.Reader){
@@ -94,26 +104,26 @@ func (c *Client)jnitPacket(){
 	c.conn.AddPacket(func()(pio.PacketBase){ return &SerrorPkt {} })
 }
 
-func (c *Client)Join(id uint32)(err error){
+func (c *Client)Join(id uint32)(rm *Room, err error){
 	var res pio.PacketBase
 	if res, err = c.conn.Ask(&CjoinPkt{
 		RoomId: id,
 	}); err != nil {
 		return
 	}
-	var room joinedRoom
+	var room *joinedRoom
 	switch rs := res.(type) {
 	case *SjoinPkt:
-		room = joinedRoom{
-			Room: rs.Room,
-			token: rs.Token,
+		if room, err = newJoinedRoom(rs.Room, rs.Token); err != nil {
+			return
 		}
 	case *SerrorPkt:
-		return fmt.Errorf("Join error: %s", rs.Error)
+		return nil, fmt.Errorf("Join error: %s", rs.Error)
 	default:
 		panic("Unexpected result")
 	}
 	c.rooms[id] = room
+	rm = room.Room
 	return
 }
 

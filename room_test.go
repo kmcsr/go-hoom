@@ -9,32 +9,6 @@ import (
 	. "github.com/kmcsr/go-hoom"
 )
 
-func TestMember(t *testing.T){
-	member := NewMember(0xab, "example-user")
-	if member.Id() != 0xab {
-		t.Errorf("member.Id() should be 0xab")
-	}
-	if member.Name() != "example-user" {
-		t.Errorf("member.Id() should be \"example-user\"")
-	}
-	buf := bytes.NewBuffer(nil)
-	w := encoding.WrapWriter(buf)
-	if err := member.WriteTo(w); err != nil {
-		t.Fatalf("Member.WriteTo: %v", err)
-	}
-	r := encoding.WrapReader(bytes.NewReader(buf.Bytes()))
-	member2 := new(Member)
-	if err := member2.ParseFrom(r); err != nil {
-		t.Fatalf("Member.ParseFrom: %v", err)
-	}
-	if member.Id() != member2.Id() {
-		t.Errorf("member.Id() should as same as member2.Id()")
-	}
-	if member.Name() != member2.Name() {
-		t.Errorf("member.Name() should as same as member2.Name()")
-	}
-}
-
 func TestRoom(t *testing.T){
 	//
 }

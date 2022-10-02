@@ -12,7 +12,10 @@ var localhost = net.IPv4(127, 0, 0, 1)
 var exampleUser = NewMember(0x22, "example-user")
 
 func TestServer(t *testing.T){
-	mem := LogMember(0x11, "server-user")
+	mem, err := LogMember(0x11, "<TOKEN>")
+	if err != nil {
+		t.Fatalf("Logging error: %v", err)
+	}
 	server := mem.NewServer(&net.TCPAddr{IP: localhost})
 	server.Listen()
 	defer server.Shutdown()

@@ -146,7 +146,7 @@ func (JoinCmd)Execute(fields ...string)(resn []interface{}, err error){
 			}
 		}()
 	}
-	if err = client.Join((uint32)(roomid)); err != nil {
+	if _, err = client.Join((uint32)(roomid)); err != nil {
 		return
 	}
 	listener, err := net.ListenTCP("tcp", nil)

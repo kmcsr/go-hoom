@@ -29,7 +29,10 @@ func initLogger()(loger logger.Logger){
 }
 
 func main(){
-	owner := hoom.LogMember(0x01, "example-owner")
+	owner, err := hoom.LogMember(0x01, "<token>")
+  if err != nil {
+    panic(err)
+  }
 	server := owner.NewServer(server_addr)
 	room := server.NewRoom("example-room", &net.TCPAddr{IP: localhost, Port: 25565})
 	loger.Info("new room id:", room.Id())
