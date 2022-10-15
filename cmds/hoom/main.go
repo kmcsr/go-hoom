@@ -11,7 +11,7 @@ import (
 	"strings"
 	"strconv"
 
-  "github.com/kmcsr/go-logger"
+	"github.com/kmcsr/go-logger"
 	"github.com/kmcsr/go-hoom"
 )
 

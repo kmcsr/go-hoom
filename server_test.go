@@ -16,7 +16,7 @@ func TestServer(t *testing.T){
 	if err != nil {
 		t.Fatalf("Logging error: %v", err)
 	}
-	server := mem.NewServer(&net.TCPAddr{IP: localhost})
+	server := mem.NewServer(&net.TCPAddr{IP: localhost}).AddHandshaker(UnsafeHandshaker)
 	server.Listen()
 	defer server.Shutdown()
 	addr := server.ListenAddr()

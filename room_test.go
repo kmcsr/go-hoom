@@ -2,7 +2,6 @@
 package hoom_test
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/kmcsr/go-pio/encoding"
@@ -20,14 +19,12 @@ func TestRoomToken(t *testing.T){
 		Token: 0x54321,
 		Sign: nil, // TODO: sign token
 	}
-	buf := bytes.NewBuffer(nil)
-	w := encoding.WrapWriter(buf)
-	if err := token.WriteTo(w); err != nil {
+	buf := encoding.NewBuffer(nil)
+	if err := token.WriteTo(buf); err != nil {
 		t.Fatalf("RoomToken.WriteTo: %v", err)
 	}
-	r := encoding.WrapReader(bytes.NewReader(buf.Bytes()))
 	token2 := new(RoomToken)
-	if err := token2.ParseFrom(r); err != nil {
+	if err := token2.ParseFrom(buf); err != nil {
 		t.Fatalf("RoomToken.ParseFrom: %v", err)
 	}
 	if token.RoomId != token2.RoomId {

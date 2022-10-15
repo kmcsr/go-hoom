@@ -2,7 +2,6 @@
 package hoom_test
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/kmcsr/go-pio/encoding"
@@ -21,14 +20,12 @@ func TestMember(t *testing.T){
 	if member.Name() != "user-171" {
 		t.Errorf("member.Id() should be \"user-171\" but it's \"%s\"", member.Name())
 	}
-	buf := bytes.NewBuffer(nil)
-	w := encoding.WrapWriter(buf)
-	if err = WriteMember(w, member); err != nil {
+	buf := encoding.NewBuffer(nil)
+	if err = WriteMember(buf, member); err != nil {
 		t.Fatalf("Member.WriteTo: %v", err)
 	}
-	r := encoding.WrapReader(bytes.NewReader(buf.Bytes()))
 	var member2 *Member
-	if member2, err = ParseMember(r); err != nil {
+	if member2, err = ParseMember(buf); err != nil {
 		t.Fatalf("Member.ParseFrom: %v", err)
 	}
 	if member.Id() != member2.Id() {

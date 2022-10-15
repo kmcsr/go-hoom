@@ -3,26 +3,26 @@ package main
 
 import (
 	"net/netip"
-  "os"
+	"os"
 
-  "github.com/sirupsen/logrus"
-  "github.com/kmcsr/go-logger"
-  logrusl "github.com/kmcsr/go-logger/logrus"
+	"github.com/sirupsen/logrus"
+	"github.com/kmcsr/go-logger"
+	logrusl "github.com/kmcsr/go-logger/logrus"
 	"github.com/kmcsr/go-hoom"
 )
 
 var loger = initLogger()
 
 func initLogger()(loger logger.Logger){
-  loger = logrusl.New()
-  loger.SetOutput(os.Stderr)
-  logrusl.Unwrap(loger).SetFormatter(&logrus.TextFormatter{
-    TimestampFormat: "2006-01-02 15:04:05.000",
-    FullTimestamp: true,
-  })
-  loger.SetLevel(logger.InfoLevel)
-  hoom.SetLogger(loger)
-  return
+	loger = logrusl.New()
+	loger.SetOutput(os.Stderr)
+	logrusl.Unwrap(loger).SetFormatter(&logrus.TextFormatter{
+		TimestampFormat: "2006-01-02 15:04:05.000",
+		FullTimestamp: true,
+	})
+	loger.SetLevel(logger.InfoLevel)
+	hoom.SetLogger(loger)
+	return
 }
 
 var (

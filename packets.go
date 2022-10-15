@@ -5,8 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 	"io"
+	"time"
 
 	"github.com/kmcsr/go-pio/encoding"
 	"github.com/kmcsr/go-pio"
@@ -239,17 +239,12 @@ func (p *CdialPkt)Ask()(res pio.PacketBase, err error){
 		sc.putConn(roomid, con)
 		loger.Debug("hoom.Server: Proxying pio.Conn and target")
 		go func(){
-			defer conn.Close()
-			defer rw.Close()
 			defer sc.popConn(roomid, con)
-			buf := make([]byte, bufSize)
-			io.CopyBuffer(conn, rw, buf)
-		}()
-		go func(){
-			defer conn.Close()
-			defer rw.Close()
-			buf := make([]byte, bufSize)
-			io.CopyBuffer(rw, conn, buf)
+			err := <-ioProxy(conn, rw)
+			loger.Trace("hoom.Server: ioProxy done")
+			if err != nil && err != io.EOF {
+				loger.Debugf("hoom.Server: ioProxy error: %v", err)
+			}
 		}()
 	}()
 	return

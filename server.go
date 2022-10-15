@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"time"
 
@@ -19,6 +20,8 @@ type Server struct{
 	Addr *net.TCPAddr
 	Listener *net.TCPListener
 
+	Handshakers []Handshaker
+
 	owner *Member
 	roomc uint32
 	rooms map[uint32]*ServerRoom
@@ -32,6 +35,46 @@ func (m *AuthedMember)NewServer(addr *net.TCPAddr)(*Server){
 		rooms: make(map[uint32]*ServerRoom),
 		conns: make(map[uint32]*serverConn),
 	}
+}
+
+func (s *Server)AddHandshaker(hs Handshaker)(*Server){
+	if hs.Id() == NoneConnId {
+		panic("handshaker's id cannot be zero")
+	}
+	s.Handshakers = append(s.Handshakers, hs)
+	return s
+}
+
+func (s *Server)PopHandshaker(id byte){
+	for i, hs := range s.Handshakers {
+		if hs.Id() == id {
+			copy(s.Handshakers[i:], s.Handshakers[i + 1:])
+			s.Handshakers = s.Handshakers[:len(s.Handshakers) - 1]
+			break
+		}
+	}
+}
+
+func (s *Server)handshake(c io.ReadWriteCloser)(rw io.ReadWriteCloser, err error){
+	r := encoding.WrapReader(c)
+	w := encoding.WrapWriter(c)
+	for _, hs := range s.Handshakers {
+		if err = w.WriteByte(hs.Id()); err != nil {
+			return
+		}
+		var flag bool
+		if flag, err = r.ReadBool(); err != nil {
+			return
+		}
+		if flag {
+			loger.Tracef("hoom.Server: Using handshaker (0x%02x)", hs.Id())
+			return hs.HandServer(c)
+		}
+	}
+	if err = w.WriteByte(NoneConnId); err != nil {
+		return
+	}
+	return nil, NoCommonHandshaker
 }
 
 func (s *Server)NewRoom(name string, target *net.TCPAddr)(r *ServerRoom){
@@ -122,7 +165,7 @@ func (s *serverConn)free(){
 	if s.mem == nil {
 		return
 	}
-	loger.Debugf("hoom.serverConn: Cleaning")
+	loger.Trace("hoom.serverConn: Cleaning")
 	delete(s.server.conns, s.mem.Id())
 	for _, r := range s.server.rooms {
 		r.Pop(s.mem.Id())
@@ -149,7 +192,7 @@ func (s *serverConn)joinRoom(id uint32)(r *Room, token *RoomToken, err error){
 	token = &RoomToken{
 		RoomId: id,
 		MemId: s.mem.Id(),
-		Token: RandUint64(),
+		Token: randUint64(),
 	}
 	if err = s.server.signToken(token); err != nil {
 		return
@@ -271,7 +314,7 @@ func (s *Server)ListenAddr()(*net.TCPAddr){
 	return s.Listener.Addr().(*net.TCPAddr)
 }
 
-func (s *Server)serveConn(c net.Conn){
+func (s *Server)serveConn(c io.ReadWriteCloser){
 	alivectx, cancel := context.WithTimeout(context.Background(), 10 * time.Second)
 	conn := pio.NewConn(c, c)
 	conn.AddPacket(func()(pio.PacketBase){ return &CbindPkt{
@@ -315,9 +358,17 @@ func (s *Server)Serve()(err error){
 		if err != nil {
 			return
 		}
+		loger.Tracef("Client '%v' handshaking", c.RemoteAddr())
+		var rw io.ReadWriteCloser
+		rw, err = s.handshake(c)
+		if err != nil {
+			loger.Debugf("Client '%v' handshake error: %v", c.RemoteAddr(), err)
+			c.Close()
+			continue
+		}
 		loger.Debugf("Client accepted: %v", c.RemoteAddr())
 
-		s.serveConn(c)
+		s.serveConn(rw)
 	}
 	return nil
 }
