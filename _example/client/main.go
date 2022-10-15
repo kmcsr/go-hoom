@@ -30,6 +30,14 @@ func initLogger()(loger logger.Logger){
 	return
 }
 
+var client_name = "example_client"
+
+func init(){
+	if len(os.Args) > 1 {
+		client_name = os.Args[1]
+	}
+}
+
 func main(){
 	buf, err := os.ReadFile("token.txt")
 	must(err)
@@ -37,7 +45,7 @@ func main(){
 	must(err)
 	token, err := hoom.ParseConnToken(buf)
 	must(err)
-	user, err := hoom.LogMember(0x02, "<token>")
+	user, err := hoom.NoAuthMemberServer.AuthMember(client_name, "")
 	must(err)
 	client, err := user.Dial(hoom.DialToken(token).
 		AddHandshaker(hoom.UnsafeHandshaker).
@@ -53,7 +61,11 @@ func main(){
 	must(err)
 	loger.Infof("Joined room %v", room)
 
-	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: localhost, Port: 12347})
+	lisaddr := &net.TCPAddr{IP: localhost}
+	if client_name == "example_client" {
+		lisaddr.Port = 12347
+	}
+	listener, err := net.ListenTCP("tcp", lisaddr)
 	must(err)
 	loger.Infof("Listening: %v", listener.Addr())
 	err = client.ServeRoom(roomid, listener)

@@ -32,7 +32,7 @@ func (m *AuthedMember)Dial(config *DialConfig)(c *Client, err error){
 		return
 	}
 	var rw io.ReadWriteCloser
-	if rw, err = m.handshake(conn, config); err != nil {
+	if rw, err = config.handshake(conn); err != nil {
 		conn.Close()
 		return
 	}
@@ -44,12 +44,13 @@ func (m *AuthedMember)Dial(config *DialConfig)(c *Client, err error){
 	}
 	c.initPacket()
 	c.conn.OnPktNotFound = func(id uint32, body encoding.Reader){
-		loger.Warn("hoom.Client: Unexpected packet id:", id)
+		loger.Warnf("hoom.Client(%p): Unexpected packet id: 0x%x", c, id)
 	}
 	go c.conn.Serve()
 	var res pio.PacketBase
 	if res, err = c.conn.Ask(&CbindPkt{
-		Mem: m.GetMem(),
+		Mem: m.Member,
+		authServer: m.authServer,
 	}); err != nil {
 		c.conn.Close()
 		return nil, err
@@ -92,8 +93,8 @@ func (c *Client)GetRoom(id uint32)(r *Room){
 }
 
 func (c *Client)initPacket(){
-	c.conn.AddPacket(func()(pio.PacketBase){ return &SjoinPkt  {c: c} })
-	c.conn.AddPacket(func()(pio.PacketBase){ return &SjoinBPkt {c: c} })
+	c.conn.AddPacket(func()(pio.PacketBase){ return &SjoinPkt  {c: c, authServer: c.mem.authServer} })
+	c.conn.AddPacket(func()(pio.PacketBase){ return &SjoinBPkt {c: c, authServer: c.mem.authServer} })
 	c.conn.AddPacket(func()(pio.PacketBase){ return &SleavePkt {c: c} })
 	c.conn.AddPacket(func()(pio.PacketBase){ return &SleaveBPkt{c: c} })
 	c.conn.AddPacket(func()(pio.PacketBase){ return &SerrorPkt {} })
@@ -120,6 +121,7 @@ func (c *Client)Join(id uint32)(rm *Room, err error){
 	}
 	c.rooms[id] = room
 	rm = room.Room
+	loger.Debugf("hoom.Client(%p): Player '%s' connected to room %s", c, c.mem.Name(), rm.Name())
 	return
 }
 
@@ -130,7 +132,7 @@ func (c *Client)dial()(conn *pio.Conn, err error){
 		return
 	}
 	var rw io.ReadWriteCloser
-	if rw, err = c.mem.handshake(con, c.config); err != nil {
+	if rw, err = c.config.handshake(con); err != nil {
 		con.Close()
 		return
 	}

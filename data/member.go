@@ -2,18 +2,18 @@
 package hoom_data
 
 type Member struct{
-	id uint32
+	id string
 	name string
 }
 
-func NewMember(id uint32, name string)(*Member){
+func NewMember(id string, name string)(*Member){
 	return &Member{
 		id: id,
 		name: name,
 	}
 }
 
-func (m *Member)Id()(uint32){
+func (m *Member)Id()(string){
 	return m.id
 }
 

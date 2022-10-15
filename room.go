@@ -16,11 +16,11 @@ type Room = hdata.Room
 
 var NewRoom = hdata.NewRoom
 
-func WriteRoom(w encoding.Writer, r *Room)(err error){
+func WriteRoom(w encoding.Writer, r *Room, ms MemberServer)(err error){
 	if err = w.WriteUint32(r.Id()); err != nil {
 		return
 	}
-	if err = WriteMember(w, r.Owner()); err != nil {
+	if err = ms.WriteMember(w, r.Owner()); err != nil {
 		return
 	}
 	tid := r.TypeId()
@@ -35,14 +35,14 @@ func WriteRoom(w encoding.Writer, r *Room)(err error){
 		return
 	}
 	for _, m := range mems {
-		if err = WriteMember(w, m); err != nil {
+		if err = ms.WriteMember(w, m); err != nil {
 			return
 		}
 	}
 	return
 }
 
-func ParseRoom(r encoding.Reader)(rm *Room, err error){
+func ParseRoom(r encoding.Reader, ms MemberServer)(rm *Room, err error){
 	var (
 		id uint32
 		name string
@@ -52,7 +52,7 @@ func ParseRoom(r encoding.Reader)(rm *Room, err error){
 	if id, err = r.ReadUint32(); err != nil {
 		return
 	}
-	if mem, err = ParseMember(r); err != nil {
+	if mem, err = ms.ParseMember(r); err != nil {
 		return
 	}
 	if _, err = io.ReadFull(r, tid[:]); err != nil {
@@ -67,7 +67,7 @@ func ParseRoom(r encoding.Reader)(rm *Room, err error){
 		return
 	}
 	for i := (uint32)(0); i < n; i++ {
-		if mem, err = ParseMember(r); err != nil {
+		if mem, err = ms.ParseMember(r); err != nil {
 			return
 		}
 		rm.Put(mem)
@@ -89,13 +89,13 @@ func (r *ServerRoom)Target()(*net.TCPAddr){
 	return r.target
 }
 
-func (r *ServerRoom)Kick(id uint32, reason string)(err error){
+func (r *ServerRoom)Kick(id string, reason string)(err error){
 	return r.server.Kick(r.Id(), id, reason)
 }
 
 type RoomToken struct{
 	RoomId uint32
-	MemId uint32
+	MemId string
 	Token uint64
 	Sign []byte
 }
@@ -104,7 +104,7 @@ func (t *RoomToken)WriteTo(w encoding.Writer)(err error){
 	if err = w.WriteUint32(t.RoomId); err != nil {
 		return
 	}
-	if err = w.WriteUint32(t.MemId); err != nil {
+	if err = w.WriteString(t.MemId); err != nil {
 		return
 	}
 	if err = w.WriteUint64(t.Token); err != nil {
@@ -120,7 +120,7 @@ func (t *RoomToken)ParseFrom(r encoding.Reader)(err error){
 	if t.RoomId, err = r.ReadUint32(); err != nil {
 		return
 	}
-	if t.MemId, err = r.ReadUint32(); err != nil {
+	if t.MemId, err = r.ReadString(); err != nil {
 		return
 	}
 	if t.Token, err = r.ReadUint64(); err != nil {

@@ -22,18 +22,20 @@ type Server struct{
 
 	Handshakers []Handshaker
 
+	authServer MemberServer
 	owner *Member
 	roomc uint32
 	rooms map[uint32]*ServerRoom
-	conns map[uint32]*serverConn
+	conns map[string]*serverConn
 }
 
 func (m *AuthedMember)NewServer(addr *net.TCPAddr)(*Server){
 	return &Server{
 		Addr: addr,
-		owner: m.GetMem(),
+		authServer: m.MemberServer(),
+		owner: m.Member,
 		rooms: make(map[uint32]*ServerRoom),
-		conns: make(map[uint32]*serverConn),
+		conns: make(map[string]*serverConn),
 	}
 }
 
@@ -77,6 +79,18 @@ func (s *Server)handshake(c io.ReadWriteCloser)(rw io.ReadWriteCloser, err error
 	return nil, NoCommonHandshaker
 }
 
+func (s *Server)broadcastR(roomid uint32, sender string, pkt pio.PacketBase)(err error){
+	for _, m := range s.rooms[roomid].Members() {
+		if id := m.Id(); id != sender {
+			c := s.conns[id]
+			if er := c.conn.Send(pkt); er != nil && err == nil {
+				err = er
+			}
+		}
+	}
+	return
+}
+
 func (s *Server)NewRoom(name string, target *net.TCPAddr)(r *ServerRoom){
 	s.roomc++
 	id := s.roomc
@@ -116,7 +130,7 @@ func (s *Server)GetRoom(id uint32)(r *ServerRoom){
 	return s.rooms[id]
 }
 
-func (s *Server)PopConn(mid uint32)(ok bool){
+func (s *Server)PopConn(mid string)(ok bool){
 	var sc *serverConn
 	if sc, ok = s.conns[mid]; ok {
 		delete(s.conns, mid)
@@ -125,10 +139,10 @@ func (s *Server)PopConn(mid uint32)(ok bool){
 	return
 }
 
-func (s *Server)Kick(rid uint32, mid uint32, reason string)(err error){
+func (s *Server)Kick(rid uint32, mid string, reason string)(err error){
 	sc, ok := s.conns[mid]
 	if !ok {
-		return fmt.Errorf("Member(%d) connection is not exists", mid)
+		return fmt.Errorf("Member(%s) connection is not exists", mid)
 	}
 	return sc.KickRoom(rid, reason)
 }
@@ -166,9 +180,16 @@ func (s *serverConn)free(){
 		return
 	}
 	loger.Trace("hoom.serverConn: Cleaning")
-	delete(s.server.conns, s.mem.Id())
+	mid := s.mem.Id()
+	delete(s.server.conns, mid)
 	for _, r := range s.server.rooms {
-		r.Pop(s.mem.Id())
+		r.Pop(mid)
+		if er := s.server.broadcastR(r.Id(), mid, &SleaveBPkt{
+			RoomId: r.Id(),
+			MemId: mid,
+		}); er != nil {
+			loger.Errorf("hoom.Server: broadcast leaved packet error: %v", er)
+		}
 	}
 	s.mem = nil
 	s.conn.Close()
@@ -187,17 +208,25 @@ func (s *serverConn)joinRoom(id uint32)(r *Room, token *RoomToken, err error){
 	}
 	r = sr.Room
 	if !sr.Put(s.mem) {
-		return nil, nil, fmt.Errorf("Member(%d) already exists", s.mem.Id())
+		return nil, nil, fmt.Errorf("Member(%s) already exists", s.mem.Id())
 	}
+	mid := s.mem.Id()
 	token = &RoomToken{
 		RoomId: id,
-		MemId: s.mem.Id(),
+		MemId: mid,
 		Token: randUint64(),
 	}
 	if err = s.server.signToken(token); err != nil {
 		return
 	}
 	s.tokens[token.RoomId] = token.Token
+	if er := s.server.broadcastR(id, mid, &SjoinBPkt{
+		RoomId: id,
+		Mem: s.mem,
+		authServer: s.server.authServer,
+	}); er != nil {
+		loger.Errorf("hoom.Server: broadcast joined packet error: %v", er)
+	}
 	return
 }
 
@@ -240,12 +269,19 @@ func (s *serverConn)leaveRoom(id uint32)(err error){
 	}
 	loger.Debugf("hoom.serverConn: Client is leaving room %d", id)
 	delete(s.tokens, id)
-	r.Pop(s.mem.Id())
+	mid := s.mem.Id()
+	r.Pop(mid)
 	if cc, ok := s.conns[id]; ok {
 		delete(s.conns, id)
 		for _, c := range cc {
 			c.Close()
 		}
+	}
+	if er := s.server.broadcastR(id, mid, &SleaveBPkt{
+		RoomId: id,
+		MemId: mid,
+	}); er != nil {
+		loger.Errorf("hoom.Server: broadcast leaved packet error: %v", er)
 	}
 	return
 }
@@ -318,6 +354,7 @@ func (s *Server)serveConn(c io.ReadWriteCloser){
 	alivectx, cancel := context.WithTimeout(context.Background(), 10 * time.Second)
 	conn := pio.NewConn(c, c)
 	conn.AddPacket(func()(pio.PacketBase){ return &CbindPkt{
+		authServer: s.authServer,
 		server: s,
 		conn: conn,
 		alive: cancel,

@@ -10,22 +10,22 @@ import (
 
 func TestMember(t *testing.T){
 	var err error
-	member, err := QueryMember(0xab)
+	member, err := NoAuthMemberServer.QueryMember("0xab")
 	if err != nil {
 		t.Fatalf("QueryMember: %v", err)
 	}
-	if member.Id() != 0xab {
-		t.Errorf("member.Id() should be 0xab")
+	if member.Id() != "0xab" {
+		t.Errorf("member.Id() should be \"0xab\"")
 	}
-	if member.Name() != "user-171" {
-		t.Errorf("member.Id() should be \"user-171\" but it's \"%s\"", member.Name())
+	if member.Name() != "User 0xab" {
+		t.Errorf("member.Id() should be \"User 0xab\" but it's \"%s\"", member.Name())
 	}
 	buf := encoding.NewBuffer(nil)
-	if err = WriteMember(buf, member); err != nil {
+	if err = NoAuthMemberServer.WriteMember(buf, member); err != nil {
 		t.Fatalf("Member.WriteTo: %v", err)
 	}
 	var member2 *Member
-	if member2, err = ParseMember(buf); err != nil {
+	if member2, err = NoAuthMemberServer.ParseMember(buf); err != nil {
 		t.Fatalf("Member.ParseFrom: %v", err)
 	}
 	if member.Id() != member2.Id() {

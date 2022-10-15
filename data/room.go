@@ -16,7 +16,7 @@ type Room struct{
 	typeId uuid.UUID 
 	name string
 	desc []Desc
-	members map[uint32]*Member
+	members map[string]*Member
 }
 
 func NewRoom(id uint32, owner *Member, typeId uuid.UUID, name string)(*Room){
@@ -25,7 +25,7 @@ func NewRoom(id uint32, owner *Member, typeId uuid.UUID, name string)(*Room){
 		owner: owner,
 		typeId: typeId,
 		name: name,
-		members: make(map[uint32]*Member),
+		members: make(map[string]*Member),
 	}
 }
 
@@ -73,7 +73,7 @@ func (r *Room)MemCount()(int){
 	return len(r.members)
 }
 
-func (r *Room)GetMember(id uint32)(m *Member){
+func (r *Room)Get(id string)(m *Member){
 	return r.members[id]
 }
 
@@ -88,7 +88,7 @@ func (r *Room)Put(m *Member)(bool){
 	return false
 }
 
-func (r *Room)Pop(id uint32)(m *Member, ok bool){
+func (r *Room)Pop(id string)(m *Member, ok bool){
 	if id == r.owner.Id() {
 		panic("Cannot pop owner from the room")
 	}

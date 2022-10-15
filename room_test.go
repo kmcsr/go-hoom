@@ -15,7 +15,7 @@ func TestRoom(t *testing.T){
 func TestRoomToken(t *testing.T){
 	token := &RoomToken{
 		RoomId: 0xabcd,
-		MemId: 0xab,
+		MemId: "0xab",
 		Token: 0x54321,
 		Sign: nil, // TODO: sign token
 	}

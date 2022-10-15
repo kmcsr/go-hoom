@@ -16,6 +16,7 @@ type (
 	CbindPkt struct{
 		Mem *Member
 
+		authServer MemberServer
 		server *Server
 		conn *pio.Conn
 		alive context.CancelFunc
@@ -32,7 +33,7 @@ type (
 	}
 
 	CdialPkt struct{
-		MemId uint32
+		MemId string
 		Token *RoomToken
 
 		server *Server
@@ -46,12 +47,14 @@ type (
 		Room *Room
 		Token *RoomToken
 
+		authServer MemberServer
 		c *Client
 	}
 	SjoinBPkt struct{
 		RoomId uint32
 		Mem *Member
 
+		authServer MemberServer
 		c *Client
 	}
 	SleavePkt struct{
@@ -62,7 +65,7 @@ type (
 	}
 	SleaveBPkt struct{
 		RoomId uint32
-		MemId uint32
+		MemId string
 
 		c *Client
 	}
@@ -85,14 +88,14 @@ func (p *CleavePkt)PktId()(uint32){ return 0x83 }
 func (p *CdialPkt) PktId()(uint32){ return 0x88 }
 
 func (p *CbindPkt)WriteTo(w encoding.Writer)(err error){
-	if err = WriteMember(w, p.Mem); err != nil {
+	if err = p.authServer.WriteMember(w, p.Mem); err != nil {
 		return
 	}
 	return
 }
 
 func (p *CbindPkt)ParseFrom(r encoding.Reader)(err error){
-	if p.Mem, err = ParseMember(r); err != nil {
+	if p.Mem, err = p.authServer.ParseMember(r); err != nil {
 		return
 	}
 	return
@@ -100,13 +103,13 @@ func (p *CbindPkt)ParseFrom(r encoding.Reader)(err error){
 
 func (p *CbindPkt)Ask()(res pio.PacketBase, err error){
 	// TODO: check member
-	loger.Tracef("hoom.Server: Member(%d) trying connect", p.Mem.Id())
+	loger.Tracef("hoom.Server: Member(%s) trying connect", p.Mem.Id())
 	cs := p.server.newServerConn(p.conn, p.Mem)
 	if cs == nil {
 		return NewSerror(fmt.Errorf("Member already exists")), nil
 	}
 	p.alive()
-	loger.Debugf("hoom.Server: Member(%d) connected", p.Mem.Id())
+	loger.Debugf("hoom.Server: Member(%s) connected", p.Mem.Id())
 	memid := p.Mem.Id()
 	go func(){
 		defer cs.free()
@@ -119,7 +122,7 @@ func (p *CbindPkt)Ask()(res pio.PacketBase, err error){
 				ping, err := cs.conn.PingWith(ctx)
 				cancel()
 				if err != nil {
-					loger.Debugf("Ping member(%d) error: %v", memid, err)
+					loger.Debugf("Ping member '%s' error: %v", memid, err)
 					if errors.Is(err, context.Canceled) {
 						return
 					}
@@ -155,6 +158,7 @@ func (p *CjoinPkt)Ask()(res pio.PacketBase, err error){
 	res = &SjoinPkt{
 		Room: room,
 		Token: token,
+		authServer: p.s.server.authServer,
 	}
 	return
 }
@@ -185,7 +189,7 @@ func (p *CleavePkt)Ask()(res pio.PacketBase, err error){
 }
 
 func (p *CdialPkt)WriteTo(w encoding.Writer)(err error){
-	if err = w.WriteUint32(p.MemId); err != nil {
+	if err = w.WriteString(p.MemId); err != nil {
 		return
 	}
 	if err = p.Token.WriteTo(w); err != nil {
@@ -195,7 +199,7 @@ func (p *CdialPkt)WriteTo(w encoding.Writer)(err error){
 }
 
 func (p *CdialPkt)ParseFrom(r encoding.Reader)(err error){
-	if p.MemId, err = r.ReadUint32(); err != nil {
+	if p.MemId, err = r.ReadString(); err != nil {
 		return
 	}
 	p.Token = new(RoomToken)
@@ -208,7 +212,7 @@ func (p *CdialPkt)ParseFrom(r encoding.Reader)(err error){
 func (p *CdialPkt)Ask()(res pio.PacketBase, err error){
 	sc, ok := p.server.conns[p.MemId]
 	if !ok {
-		return NewSerror(fmt.Errorf("Member(%d) have not join this server", p.MemId)), nil
+		return NewSerror(fmt.Errorf("Member(%s) have not join this server", p.MemId)), nil
 	}
 	room, e := sc.checkToken(p.Token)
 	if e != nil {
@@ -272,7 +276,7 @@ func (p *SleaveBPkt)PktId()(uint32){ return 0x94 }
 func (p *SerrorPkt) PktId()(uint32){ return 0x95 }
 
 func (p *SjoinPkt)WriteTo(w encoding.Writer)(err error){
-	if err = WriteRoom(w, p.Room); err != nil {
+	if err = WriteRoom(w, p.Room, p.authServer); err != nil {
 		return
 	}
 	if err = p.Token.WriteTo(w); err != nil {
@@ -282,7 +286,7 @@ func (p *SjoinPkt)WriteTo(w encoding.Writer)(err error){
 }
 
 func (p *SjoinPkt)ParseFrom(r encoding.Reader)(err error){
-	if p.Room, err = ParseRoom(r); err != nil {
+	if p.Room, err = ParseRoom(r, p.authServer); err != nil {
 		return
 	}
 	p.Token = new(RoomToken)
@@ -296,7 +300,7 @@ func (p *SjoinBPkt)WriteTo(w encoding.Writer)(err error){
 	if err = w.WriteUint32(p.RoomId); err != nil {
 		return
 	}
-	if err = WriteMember(w, p.Mem); err != nil {
+	if err = p.authServer.WriteMember(w, p.Mem); err != nil {
 		return
 	}
 	return
@@ -306,14 +310,19 @@ func (p *SjoinBPkt)ParseFrom(r encoding.Reader)(err error){
 	if p.RoomId, err = r.ReadUint32(); err != nil {
 		return
 	}
-	if p.Mem, err = ParseMember(r); err != nil {
+	if p.Mem, err = p.authServer.ParseMember(r); err != nil {
 		return
 	}
 	return
 }
 
 func (p *SjoinBPkt)Trigger()(err error){
-	panic("TODO")
+	r, ok := p.c.rooms[p.RoomId]
+	if !ok {
+		return fmt.Errorf("hoom.SjoinBPkt: Room %d does not connect", p.RoomId)
+	}
+	r.Put(p.Mem)
+	loger.Tracef("hoom.Client(%p): Player '%s' joined room %s", p.c, p.Mem.Name(), r.Name())
 	return
 }
 
@@ -335,7 +344,7 @@ func (p *SleaveBPkt)WriteTo(w encoding.Writer)(err error){
 	if err = w.WriteUint32(p.RoomId); err != nil {
 		return
 	}
-	if err = w.WriteUint32(p.MemId); err != nil {
+	if err = w.WriteString(p.MemId); err != nil {
 		return
 	}
 	return
@@ -345,14 +354,22 @@ func (p *SleaveBPkt)ParseFrom(r encoding.Reader)(err error){
 	if p.RoomId, err = r.ReadUint32(); err != nil {
 		return
 	}
-	if p.MemId, err = r.ReadUint32(); err != nil {
+	if p.MemId, err = r.ReadString(); err != nil {
 		return
 	}
 	return
 }
 
 func (p *SleaveBPkt)Trigger()(err error){
-	panic("TODO")
+	r, ok := p.c.rooms[p.RoomId]
+	if !ok {
+		return fmt.Errorf("hoom.SjoinBPkt: Room %d does not connect", p.RoomId)
+	}
+	mem, ok := r.Pop(p.MemId)
+	if !ok {
+		return
+	}
+	loger.Tracef("hoom.Client(%p): Player '%s' leaved room %s", p.c, mem.Name(), r.Name())
 	return
 }
 

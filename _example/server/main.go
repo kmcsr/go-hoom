@@ -32,7 +32,7 @@ func initLogger()(loger logger.Logger){
 }
 
 func main(){
-	owner, err := hoom.LogMember(0x01, "<token>")
+	owner, err := hoom.NoAuthMemberServer.AuthMember("example_server", "")
 	if err != nil {
 		panic(err)
 	}

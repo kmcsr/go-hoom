@@ -187,3 +187,27 @@ func (c *DialConfig)Handshakers()(hs []Handshaker){
 	}
 	return
 }
+
+func (cfg *DialConfig)handshake(c io.ReadWriteCloser)(rw io.ReadWriteCloser, err error){
+	r := encoding.WrapReader(c)
+	w := encoding.WrapWriter(c)
+	loger.Tracef("AuthedMember.handshakers: %v", cfg.handshakers)
+	var id byte
+	for {
+		if id, err = r.ReadByte(); err != nil {
+			return
+		}
+		loger.Tracef("hoom.Client: Trying handshaker 0x%02x", id)
+		if id == NoneConnId {
+			break
+		}
+		hs, ok := cfg.GetHandshaker(id)
+		if err = w.WriteBool(ok); err != nil {
+			return
+		}
+		if ok {
+			return hs.HandClient(c, cfg)
+		}
+	}
+	return nil, NoCommonHandshaker
+}

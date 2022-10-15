@@ -3,7 +3,7 @@ package hoom
 
 import (
 	"errors"
-	"fmt"
+	// "fmt"
 	"io"
 
 	"github.com/kmcsr/go-pio/encoding"
@@ -12,50 +12,80 @@ import (
 
 type Member = hdata.Member
 
-func NewMember(id uint32, name string)(*Member){
+func NewMember(id string, name string)(*Member){
 	return hdata.NewMember(id, name)
 }
 
-func WriteMember(w encoding.Writer, m *Member)(err error){
-	if err = w.WriteUint32(m.Id()); err != nil {
+type MemberServer interface{
+	WriteMember(w io.Writer, m *Member)(err error)
+	ParseMember(r io.Reader)(m *Member, err error)
+	QueryMember(id string)(m *Member, err error)
+	AuthMember(id string, password string)(authedMem *AuthedMember, err error)
+}
+
+var UserIdNotExists = errors.New("User id not exists")
+var PasswordIncorrectErr = errors.New("Password incorrect")
+
+type noAuthMemberServer struct{}
+
+var NoAuthMemberServer MemberServer = noAuthMemberServer{}
+
+func (noAuthMemberServer)WriteMember(iw io.Writer, m *Member)(err error){
+	w := encoding.WrapWriter(iw)
+	if err = w.WriteString(m.Id()); err != nil {
 		return
 	}
 	return
 }
 
-func ParseMember(r encoding.Reader)(m *Member, err error){
-	var memid uint32
-	if memid, err = r.ReadUint32(); err != nil {
+func (s noAuthMemberServer)ParseMember(ir io.Reader)(m *Member, err error){
+	r := encoding.WrapReader(ir)
+	var id string
+	if id, err = r.ReadString(); err != nil {
 		return
 	}
-	return QueryMember(memid)
-}
-
-func QueryMember(id uint32)(m *Member, err error){
-	// TODO: query member from global server
-	m = NewMember(id, fmt.Sprintf("user-%d", id))
+	if m, err = s.QueryMember(id); err != nil {
+		return
+	}
 	return
 }
+
+func (noAuthMemberServer)QueryMember(id string)(m *Member, err error){
+	if id == "" {
+		return nil, UserIdNotExists
+	}
+	return NewMember(id, "User " + id), nil
+}
+
+func (s noAuthMemberServer)AuthMember(id string, password string)(authedMem *AuthedMember, err error){
+	var mem *Member
+	if mem, err = s.QueryMember(id); err != nil {
+		return
+	}
+	if password != "" {
+		return nil, PasswordIncorrectErr
+	}
+	return NewAuthMember(s, mem, "AuthToken:noAuthMemberServer"), nil
+}
+
 
 type AuthedMember struct{
 	*Member
+
+	authServer MemberServer
 	authToken string
 }
 
-func LogMember(id uint32, token string)(m *AuthedMember, err error){
-	var m0 *Member
-	// TODO: auth member
-	m0 = NewMember(id, fmt.Sprintf("user-%d", id))
-	authToken := ""
-	m = &AuthedMember{
-		Member: m0,
+func NewAuthMember(authServer MemberServer, mem *Member, authToken string)(*AuthedMember){
+	return &AuthedMember{
+		Member: mem,
+		authServer: authServer,
 		authToken: authToken,
 	}
-	return
 }
 
-func (m *AuthedMember)GetMem()(*Member){
-	return m.Member
+func (m *AuthedMember)MemberServer()(MemberServer){
+	return m.authServer
 }
 
 var (
@@ -63,27 +93,3 @@ var (
 	PubkeyNotVerifiedErr = errors.New("Public key not verified")
 	ConnHijackedErr = errors.New("Connection has been hijacked")
 )
-
-func (m *AuthedMember)handshake(c io.ReadWriteCloser, config *DialConfig)(rw io.ReadWriteCloser, err error){
-	r := encoding.WrapReader(c)
-	w := encoding.WrapWriter(c)
-	loger.Tracef("AuthedMember.handshakers: %v", config.handshakers)
-	var id byte
-	for {
-		if id, err = r.ReadByte(); err != nil {
-			return
-		}
-		loger.Tracef("hoom.Client: Trying handshaker 0x%02x", id)
-		if id == NoneConnId {
-			break
-		}
-		hs, ok := config.GetHandshaker(id)
-		if err = w.WriteBool(ok); err != nil {
-			return
-		}
-		if ok {
-			return hs.HandClient(c, config)
-		}
-	}
-	return nil, NoCommonHandshaker
-}

@@ -9,13 +9,15 @@ import (
 )
 
 var localhost = net.IPv4(127, 0, 0, 1)
-var exampleUser = NewMember(0x22, "example-user")
+var exampleUser = NewMember("userid", "example-user")
 
 func TestServer(t *testing.T){
-	mem, err := LogMember(0x11, "<TOKEN>")
-	if err != nil {
-		t.Fatalf("Logging error: %v", err)
-	}
+	// mem, token, err := AuthMember(0x11, "<TOKEN>")
+	// if err != nil {
+	// 	t.Fatalf("Logging error: %v", err)
+	// }
+	var mem *AuthedMember
+	return
 	server := mem.NewServer(&net.TCPAddr{IP: localhost}).AddHandshaker(UnsafeHandshaker)
 	server.Listen()
 	defer server.Shutdown()
